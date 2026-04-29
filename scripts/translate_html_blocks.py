@@ -138,6 +138,22 @@ body {
   margin-right: auto !important;
   transform: none !important;
 }
+.ltx_transformed_outer:has(table) {
+  display: block !important;
+  width: 100% !important;
+  height: auto !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  text-align: center !important;
+  vertical-align: baseline !important;
+}
+.ltx_transformed_outer:has(table) > .ltx_transformed_inner {
+  display: block !important;
+  width: 100% !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  transform: none !important;
+}
 .ltx_figure img, .ltx_graphics {
   display: block;
   max-width: 100% !important;
