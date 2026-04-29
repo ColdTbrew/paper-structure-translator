@@ -130,10 +130,22 @@ table, .ltx_tabular {
   margin-right: auto !important;
   font-size: 16px;
   line-height: 1.35;
+  border-top: 1.5px solid #333 !important;
+  border-bottom: 1.5px solid #333 !important;
 }
 td, th, .ltx_td, .ltx_th {
   padding: 4px 8px !important;
   vertical-align: middle;
+  border: 1px solid #8e8e8e !important;
+}
+thead td, thead th, .ltx_tr:first-child > .ltx_td, .ltx_tr:first-child > .ltx_th {
+  border-bottom: 1.5px solid #333 !important;
+}
+.ltx_tabular .ltx_border_t,
+.ltx_tabular .ltx_border_b,
+.ltx_tabular .ltx_border_l,
+.ltx_tabular .ltx_border_r {
+  border-color: #333 !important;
 }
 .ltx_page_footer, .ltx_page_header, .ltx_page_logo {
   display: none !important;
