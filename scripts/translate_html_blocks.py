@@ -117,6 +117,8 @@ body {
 }
 .ltx_table {
   display: flow-root !important;
+  width: 100% !important;
+  text-align: center !important;
   page-break-inside: avoid;
   break-inside: avoid;
 }
@@ -124,10 +126,16 @@ body {
   display: block !important;
   width: 100% !important;
   height: auto !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  text-align: center !important;
   vertical-align: baseline !important;
 }
 .ltx_table .ltx_transformed_inner {
   display: block !important;
+  width: 100% !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
   transform: none !important;
 }
 .ltx_figure img, .ltx_graphics {
@@ -177,8 +185,7 @@ svg.ltx_picture .ltx_inline-block {
 }
 table, .ltx_tabular {
   border-collapse: collapse !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
+  margin: 0 auto !important;
   width: 100% !important;
   max-width: 100% !important;
   table-layout: fixed !important;
