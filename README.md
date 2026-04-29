@@ -1,5 +1,7 @@
 # Structure-Preserving Paper Translator
 
+[English](README.md) | [한국어](README.ko.md)
+
 OpenAI-compatible pipeline for making clean Korean paper-viewer HTML from ar5iv HTML.
 
 The goal is not to summarize a paper. The goal is to keep the paper readable like a normal article page while translating the body text as literally as possible.
