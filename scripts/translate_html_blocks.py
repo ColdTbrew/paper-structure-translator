@@ -301,23 +301,32 @@ document.addEventListener("DOMContentLoaded", function () {
   const columns = Array.from(document.querySelectorAll(".codex_parallel_column"));
   let syncEnabled = true;
   let isSyncing = false;
-  let lastScrolledColumn = columns[1] || columns[0];
-  function scrollRatio(element) {
-    const max = element.scrollHeight - element.clientHeight;
-    return max > 0 ? element.scrollTop / max : 0;
+  const scrollPositions = new Map();
+  function captureScrollPositions() {
+    columns.forEach((column) => {
+      scrollPositions.set(column, column.scrollTop);
+    });
   }
-  function setScrollRatio(element, ratio) {
+  function clampScrollTop(element, value) {
     const max = element.scrollHeight - element.clientHeight;
-    element.scrollTop = Math.max(0, Math.min(max, max * ratio));
+    return Math.max(0, Math.min(max, value));
   }
   function syncFrom(source) {
     if (!source || !syncEnabled || isSyncing || columns.length < 2) return;
+    const previousTop = scrollPositions.get(source) ?? source.scrollTop;
+    const delta = source.scrollTop - previousTop;
+    if (!delta) {
+      captureScrollPositions();
+      return;
+    }
     isSyncing = true;
-    const ratio = scrollRatio(source);
     columns.forEach((column) => {
-      if (column !== source) setScrollRatio(column, ratio);
+      if (column !== source) {
+        column.scrollTop = clampScrollTop(column, column.scrollTop + delta);
+      }
     });
     window.setTimeout(() => {
+      captureScrollPositions();
       isSyncing = false;
     }, 0);
   }
@@ -327,7 +336,7 @@ document.addEventListener("DOMContentLoaded", function () {
     syncButton.textContent = enabled ? "스크롤 동기화 끄기" : "스크롤 동기화 켜기";
     syncButton.classList.toggle("is_off", !enabled);
     syncButton.setAttribute("aria-pressed", enabled ? "true" : "false");
-    if (enabled) syncFrom(lastScrolledColumn);
+    captureScrollPositions();
   }
   function activate(target) {
     buttons.forEach((button) => {
@@ -342,7 +351,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     if (target === "codex-panel-parallel") {
       window.scrollTo(0, 0);
-      window.setTimeout(() => syncFrom(lastScrolledColumn), 0);
+      window.setTimeout(captureScrollPositions, 0);
     }
   }
   buttons.forEach((button) => {
@@ -351,7 +360,6 @@ document.addEventListener("DOMContentLoaded", function () {
   columns.forEach((column) => {
     column.addEventListener("scroll", () => {
       if (isSyncing) return;
-      lastScrolledColumn = column;
       syncFrom(column);
     }, { passive: true });
   });
