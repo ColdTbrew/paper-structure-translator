@@ -111,7 +111,9 @@ body {
 .ltx_figure, .ltx_table {
   margin: 42px auto !important;
   max-width: 100%;
-  overflow-x: visible;
+  overflow: visible;
+  clear: both;
+  display: block;
 }
 .ltx_figure img, .ltx_graphics {
   display: block;
@@ -131,21 +133,28 @@ table, .ltx_tabular {
   border-collapse: collapse !important;
   margin-left: auto !important;
   margin-right: auto !important;
-  width: 100% !important;
   max-width: 100% !important;
   table-layout: auto !important;
-  font-size: clamp(10px, 1.18vw, 15px);
-  line-height: 1.25;
+  font-size: clamp(8px, 0.95vw, 12px) !important;
+  line-height: 1.15 !important;
   border-top: 1.5px solid #333 !important;
   border-bottom: 1.5px solid #333 !important;
 }
 td, th, .ltx_td, .ltx_th {
-  padding: 3px 5px !important;
+  padding: 2px 4px !important;
   vertical-align: middle;
   border: 1px solid #8e8e8e !important;
   white-space: normal !important;
-  overflow-wrap: anywhere;
-  word-break: normal;
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+.ltx_table table,
+.ltx_table .ltx_tabular {
+  transform-origin: top center;
+}
+.ltx_table + *,
+.ltx_figure + * {
+  clear: both;
 }
 thead td, thead th, .ltx_tr:first-child > .ltx_td, .ltx_tr:first-child > .ltx_th {
   border-bottom: 1.5px solid #333 !important;
@@ -166,6 +175,26 @@ a { color: #174ea6; text-decoration-thickness: 1px; text-underline-offset: 2px; 
   .ltx_title_document { font-size: 25px !important; }
 }
 </style>
+"""
+
+
+TABLE_FIT_SCRIPT = """
+<script id="codex-table-fit-script">
+function codexFitTables() {
+  document.querySelectorAll(".ltx_table").forEach((figure) => {
+    const table = figure.querySelector("table, .ltx_tabular");
+    if (!table) return;
+    table.style.zoom = "1";
+    const available = figure.clientWidth || figure.parentElement?.clientWidth || 0;
+    const actual = table.scrollWidth || table.getBoundingClientRect().width || 0;
+    if (!available || !actual || actual <= available) return;
+    const scale = Math.max(0.42, Math.min(1, available / actual));
+    table.style.zoom = String(scale);
+  });
+}
+window.addEventListener("load", codexFitTables);
+window.addEventListener("resize", codexFitTables);
+</script>
 """
 
 
@@ -432,12 +461,21 @@ def inject_style(soup: BeautifulSoup) -> None:
     existing = soup.find(id="codex-paper-viewer-style")
     if existing:
         existing.decompose()
+    existing_script = soup.find(id="codex-table-fit-script")
+    if existing_script:
+        existing_script.decompose()
     head = soup.head or soup.new_tag("head")
     if not soup.head:
         soup.html.insert(0, head)
     style_tag = BeautifulSoup(PAPER_CSS, "lxml").find("style")
     if style_tag:
         head.append(style_tag)
+    body = soup.body or soup.new_tag("body")
+    if not soup.body:
+        soup.html.append(body)
+    script_tag = BeautifulSoup(TABLE_FIT_SCRIPT, "lxml").find("script")
+    if script_tag:
+        body.append(script_tag)
 
 
 def inject_bilingual_assets(soup: BeautifulSoup) -> None:
