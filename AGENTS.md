@@ -6,7 +6,7 @@ If a user gives you only this repository URL, use this file as the operating gui
 
 1. Set up with `uv sync`.
 2. Ask the user for `OPENAI_API_KEY` and `OPENAI_BASE_URL` if `.env` is not already present.
-3. Run `scripts/fetch_sources.py`, then `scripts/translate_html_blocks.py` for the target paper.
+3. Use `./paper-translator` for `doctor`, `fetch`, `translate`, `restyle`, and `serve`.
 4. Verify generated HTML in a real browser.
 5. Never commit `.env`, `inputs/`, `outputs/`, or cache files unless the user explicitly changes the repo policy.
 
@@ -28,7 +28,8 @@ The pipeline should:
 
 - `README.md`: English user documentation.
 - `README.ko.md`: Korean user documentation.
-- `scripts/fetch_sources.py`: downloads configured ar5iv source HTML into `inputs/`.
+- `paper-translator`: primary CLI wrapper; it runs `scripts/paper_translator.py` through `uv`.
+- `scripts/paper_translator.py`: agent-aware CLI with `--json` and `--dry-run` support.
 - `scripts/translate_html_blocks.py`: masks HTML tags, translates text blocks, restores tags, and writes viewer HTML.
 - `scripts/apply_paper_viewer_style.py`: reapplies viewer CSS and restores source tables without calling the model.
 - `skills/paper-structure-translator/SKILL.md`: reusable skill instructions for agents.
@@ -51,40 +52,36 @@ OPENAI_BASE_URL=http://host:port/v1
 
 Do not invent or commit secrets. If credentials are missing, run only non-network verification or `--dry-run`, then ask the user for the missing values.
 
-## One-Paper Workflow
+## CLI Workflow
 
-Fetch sources first:
+Check readiness:
 
 ```bash
-uv run scripts/fetch_sources.py
+./paper-translator doctor --json
 ```
 
-Dry run:
+Fetch source HTML with explicit flags:
 
 ```bash
-uv run scripts/translate_html_blocks.py \
-  --input inputs/mmdocrag.source.html \
-  --output outputs/mmdocrag.ko.paper.html \
-  --bilingual-output outputs/mmdocrag.ko-en.paper.html \
-  --cache outputs/cache/mmdocrag.masked.translation.jsonl \
-  --progress-log outputs/cache/mmdocrag.masked.progress.log \
-  --model gpt-5.4-mini \
-  --env-file .env \
+./paper-translator fetch \
+  --paper-id mmdocrag \
+  --source-url https://ar5iv.labs.arxiv.org/html/2505.16470v2 \
+  --json
+```
+
+Dry run before calling the model:
+
+```bash
+./paper-translator translate \
+  --paper-id mmdocrag \
+  --json \
   --dry-run
 ```
 
 Actual run:
 
 ```bash
-PYTHONUNBUFFERED=1 uv run scripts/translate_html_blocks.py \
-  --input inputs/mmdocrag.source.html \
-  --output outputs/mmdocrag.ko.paper.html \
-  --bilingual-output outputs/mmdocrag.ko-en.paper.html \
-  --cache outputs/cache/mmdocrag.masked.translation.jsonl \
-  --progress-log outputs/cache/mmdocrag.masked.progress.log \
-  --model gpt-5.4-mini \
-  --env-file .env \
-  --max-chars 5000
+./paper-translator translate --paper-id mmdocrag
 ```
 
 ## Style-Only Refresh
@@ -92,11 +89,7 @@ PYTHONUNBUFFERED=1 uv run scripts/translate_html_blocks.py \
 If translated HTML already exists and the user only wants CSS/viewer/table fixes, do not call the LLM. Reapply style and restore tables:
 
 ```bash
-uv run scripts/apply_paper_viewer_style.py \
-  outputs/mmdocrag.ko.paper.html \
-  outputs/mmdocrag.ko.paper.html \
-  inputs/mmdocrag.source.html \
-  --bilingual-output outputs/mmdocrag.ko-en.paper.html
+./paper-translator restyle --paper-id mmdocrag
 ```
 
 ## Verification Checklist
@@ -110,7 +103,7 @@ uv run python -m py_compile scripts/*.py
 For browser verification:
 
 ```bash
-python3 -m http.server 8799
+./paper-translator serve --port 8799
 ```
 
 Then open generated files, for example:
@@ -137,8 +130,8 @@ Check:
 - Before committing, check for secrets:
 
 ```bash
-rg -n -e 'sk-[A-Za-z0-9]' -e 'OPENAI_API_KEY=.*sk-[A-Za-z0-9]' README.md README.ko.md AGENTS.md CLAUDE.md skills scripts .env.example pyproject.toml uv.lock || true
+rg -n -e 'sk-[A-Za-z0-9]' -e 'OPENAI_API_KEY=.*sk-[A-Za-z0-9]' README.md README.ko.md AGENTS.md CLAUDE.md skills scripts paper-translator .env.example pyproject.toml uv.lock || true
 ```
 
 - Do not include full translated paper outputs in git unless the user explicitly asks and redistribution is permitted.
-- Keep changes scoped. If the user asks for a viewer/layout fix, prefer `apply_paper_viewer_style.py` or CSS changes over rerunning translation.
+- Keep changes scoped. If the user asks for a viewer/layout fix, prefer `./paper-translator restyle` or CSS changes over rerunning translation.

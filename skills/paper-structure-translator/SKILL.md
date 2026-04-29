@@ -42,55 +42,48 @@ If `.env` is missing, do not invent credentials. Run `--dry-run` or ask the user
 
 ## Main Commands
 
+Check readiness:
+
+```bash
+./paper-translator doctor --json
+```
+
 Fetch source HTML:
 
 ```bash
-uv run scripts/fetch_sources.py
+./paper-translator fetch \
+  --paper-id mmdocrag \
+  --source-url https://ar5iv.labs.arxiv.org/html/2505.16470v2 \
+  --json
 ```
 
 One-paper dry run:
 
 ```bash
-uv run scripts/translate_html_blocks.py \
-  --input inputs/mmdocrag.source.html \
-  --output outputs/mmdocrag.ko.paper.html \
-  --bilingual-output outputs/mmdocrag.ko-en.paper.html \
-  --cache outputs/cache/mmdocrag.masked.translation.jsonl \
-  --progress-log outputs/cache/mmdocrag.masked.progress.log \
-  --model gpt-5.4-mini \
-  --env-file .env \
+./paper-translator translate \
+  --paper-id mmdocrag \
+  --json \
   --dry-run
 ```
 
 One-paper real run:
 
 ```bash
-PYTHONUNBUFFERED=1 uv run scripts/translate_html_blocks.py \
-  --input inputs/mmdocrag.source.html \
-  --output outputs/mmdocrag.ko.paper.html \
-  --bilingual-output outputs/mmdocrag.ko-en.paper.html \
-  --cache outputs/cache/mmdocrag.masked.translation.jsonl \
-  --progress-log outputs/cache/mmdocrag.masked.progress.log \
-  --model gpt-5.4-mini \
-  --env-file .env \
-  --max-chars 5000
+./paper-translator translate --paper-id mmdocrag
 ```
 
 Style/table refresh without LLM calls:
 
 ```bash
-uv run scripts/apply_paper_viewer_style.py \
-  outputs/mmdocrag.ko.paper.html \
-  outputs/mmdocrag.ko.paper.html \
-  inputs/mmdocrag.source.html \
-  --bilingual-output outputs/mmdocrag.ko-en.paper.html
+./paper-translator restyle --paper-id mmdocrag
 ```
 
 ## Editing Rules
 
-- Use `scripts/translate_html_blocks.py` for translation, masking, bilingual viewer, and CSS behavior.
-- Use `scripts/apply_paper_viewer_style.py` for regenerating final viewer HTML from already translated HTML.
-- Add or change configured source URLs in `scripts/fetch_sources.py`, or place an ar5iv HTML file directly under `inputs/`.
+- Use `./paper-translator` as the primary interface.
+- Use `scripts/translate_html_blocks.py` only when editing translation, masking, bilingual viewer, and CSS internals.
+- Use `scripts/apply_paper_viewer_style.py` only when editing restyle internals.
+- Prefer `./paper-translator translate --source-url ... --paper-id ...` over editing source URL lists.
 - Keep `figure.ltx_table` out of model calls.
 - Preserve HTML tags with the mask/restore path.
 - Keep generated HTML under `outputs/`; it is ignored by git.
@@ -106,7 +99,7 @@ uv run python -m py_compile scripts/*.py
 For layout changes, verify in a browser:
 
 ```bash
-python3 -m http.server 8799
+./paper-translator serve --port 8799
 ```
 
 Open:
@@ -130,7 +123,7 @@ Check:
 Check for secrets:
 
 ```bash
-rg -n -e 'sk-[A-Za-z0-9]' -e 'OPENAI_API_KEY=.*sk-[A-Za-z0-9]' README.md README.ko.md AGENTS.md CLAUDE.md skills scripts .env.example pyproject.toml uv.lock || true
+rg -n -e 'sk-[A-Za-z0-9]' -e 'OPENAI_API_KEY=.*sk-[A-Za-z0-9]' README.md README.ko.md AGENTS.md CLAUDE.md skills scripts paper-translator .env.example pyproject.toml uv.lock || true
 ```
 
 Do not commit:

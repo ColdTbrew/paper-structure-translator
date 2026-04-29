@@ -54,38 +54,38 @@ OPENAI_BASE_URL=http://host:port/v1
 
 ## 빠른 시작
 
-먼저 소스 HTML을 가져옵니다.
+먼저 로컬 환경을 확인합니다.
 
 ```bash
-uv run scripts/fetch_sources.py
+./paper-translator doctor
+```
+
+명시적인 CLI 플래그로 소스 HTML을 가져옵니다.
+
+```bash
+./paper-translator fetch \
+  --paper-id mmdocrag \
+  --source-url https://ar5iv.labs.arxiv.org/html/2505.16470v2
+```
+
+모든 명령은 에이전트가 읽기 좋은 JSON 출력을 지원합니다.
+
+```bash
+./paper-translator doctor --json
 ```
 
 모델을 호출하기 전에 드라이런으로 블록 수를 확인합니다.
 
 ```bash
-uv run scripts/translate_html_blocks.py \
-  --input inputs/mmdocrag.source.html \
-  --output outputs/mmdocrag.ko.paper.html \
-  --bilingual-output outputs/mmdocrag.ko-en.paper.html \
-  --cache outputs/cache/mmdocrag.masked.translation.jsonl \
-  --progress-log outputs/cache/mmdocrag.masked.progress.log \
-  --model gpt-5.4-mini \
-  --env-file .env \
+./paper-translator translate \
+  --paper-id mmdocrag \
   --dry-run
 ```
 
 그다음 실제 번역을 실행합니다.
 
 ```bash
-PYTHONUNBUFFERED=1 uv run scripts/translate_html_blocks.py \
-  --input inputs/mmdocrag.source.html \
-  --output outputs/mmdocrag.ko.paper.html \
-  --bilingual-output outputs/mmdocrag.ko-en.paper.html \
-  --cache outputs/cache/mmdocrag.masked.translation.jsonl \
-  --progress-log outputs/cache/mmdocrag.masked.progress.log \
-  --model gpt-5.4-mini \
-  --env-file .env \
-  --max-chars 5000
+./paper-translator translate --paper-id mmdocrag
 ```
 
 출력 파일은 다음과 같습니다.
@@ -100,35 +100,29 @@ outputs/mmdocrag.ko-en.paper.html
 
 ## 다른 논문 번역하기
 
-ar5iv HTML 파일을 `inputs/` 아래에 추가하거나 가져온 뒤, 그 파일을 `scripts/translate_html_blocks.py`에 넘깁니다.
+새 ar5iv URL을 CLI에 직접 넘깁니다. `--paper-id`를 기준으로 입력, 출력, 캐시, 병행 출력 경로가 자동으로 정해집니다.
 
 ```bash
-uv run scripts/translate_html_blocks.py \
-  --input inputs/your-paper.source.html \
-  --output outputs/your-paper.ko.paper.html \
-  --bilingual-output outputs/your-paper.ko-en.paper.html \
-  --cache outputs/cache/your-paper.masked.translation.jsonl \
-  --progress-log outputs/cache/your-paper.masked.progress.log \
-  --model gpt-5.4-mini \
-  --env-file .env \
+./paper-translator translate \
+  --paper-id your-paper \
+  --source-url https://ar5iv.labs.arxiv.org/html/... \
   --dry-run
 ```
+
+블록 수가 괜찮아 보이면 `--dry-run`을 제거하고 실행합니다.
 
 ## 리더 스타일 재적용 또는 표 복원
 
 이미 번역된 HTML이 있고, 리더 CSS를 새로 적용하거나 원본 표를 다시 복원하고 싶다면 다음 명령을 사용합니다.
 
 ```bash
-uv run scripts/apply_paper_viewer_style.py \
-  outputs/mmdocrag.ko.paper.html \
-  outputs/mmdocrag.ko.paper.html \
-  inputs/mmdocrag.source.html \
-  --bilingual-output outputs/mmdocrag.ko-en.paper.html
+./paper-translator restyle --paper-id mmdocrag
 ```
 
 ## 스크립트
 
-- `scripts/fetch_sources.py`: 설정된 ar5iv HTML 소스를 다운로드합니다.
+- `paper-translator`: `uv`를 통해 `scripts/paper_translator.py`를 실행하는 CLI 래퍼입니다.
+- `scripts/paper_translator.py`: `doctor`, `fetch`, `translate`, `restyle`, `serve`를 제공하는 에이전트 친화 CLI입니다.
 - `scripts/translate_html_blocks.py`: 태그를 마스킹하고, 텍스트 블록을 번역하고, 태그를 복원한 뒤 논문 리더 HTML을 작성합니다.
 - `scripts/apply_paper_viewer_style.py`: 리더 CSS를 다시 적용하고, ar5iv asset 링크를 고치며, 선택적으로 원본 표 HTML을 복원합니다.
 

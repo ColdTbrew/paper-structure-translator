@@ -54,38 +54,38 @@ OPENAI_BASE_URL=http://host:port/v1
 
 ## Quick Start
 
-Fetch source HTML first:
+Check the local environment:
 
 ```bash
-uv run scripts/fetch_sources.py
+./paper-translator doctor
+```
+
+Fetch source HTML with explicit CLI flags:
+
+```bash
+./paper-translator fetch \
+  --paper-id mmdocrag \
+  --source-url https://ar5iv.labs.arxiv.org/html/2505.16470v2
+```
+
+Agent-friendly JSON output is available on every command:
+
+```bash
+./paper-translator doctor --json
 ```
 
 Run a dry run to inspect block counts before calling the model:
 
 ```bash
-uv run scripts/translate_html_blocks.py \
-  --input inputs/mmdocrag.source.html \
-  --output outputs/mmdocrag.ko.paper.html \
-  --bilingual-output outputs/mmdocrag.ko-en.paper.html \
-  --cache outputs/cache/mmdocrag.masked.translation.jsonl \
-  --progress-log outputs/cache/mmdocrag.masked.progress.log \
-  --model gpt-5.4-mini \
-  --env-file .env \
+./paper-translator translate \
+  --paper-id mmdocrag \
   --dry-run
 ```
 
 Then run the translation:
 
 ```bash
-PYTHONUNBUFFERED=1 uv run scripts/translate_html_blocks.py \
-  --input inputs/mmdocrag.source.html \
-  --output outputs/mmdocrag.ko.paper.html \
-  --bilingual-output outputs/mmdocrag.ko-en.paper.html \
-  --cache outputs/cache/mmdocrag.masked.translation.jsonl \
-  --progress-log outputs/cache/mmdocrag.masked.progress.log \
-  --model gpt-5.4-mini \
-  --env-file .env \
-  --max-chars 5000
+./paper-translator translate --paper-id mmdocrag
 ```
 
 The output files are:
@@ -100,35 +100,29 @@ outputs/mmdocrag.ko-en.paper.html
 
 ## Translate Another Paper
 
-Add or fetch an ar5iv HTML file under `inputs/`, then pass that file to `scripts/translate_html_blocks.py`.
+Pass a new ar5iv URL directly to the CLI. It will derive the default input, output, cache, and bilingual output paths from `--paper-id`.
 
 ```bash
-uv run scripts/translate_html_blocks.py \
-  --input inputs/your-paper.source.html \
-  --output outputs/your-paper.ko.paper.html \
-  --bilingual-output outputs/your-paper.ko-en.paper.html \
-  --cache outputs/cache/your-paper.masked.translation.jsonl \
-  --progress-log outputs/cache/your-paper.masked.progress.log \
-  --model gpt-5.4-mini \
-  --env-file .env \
+./paper-translator translate \
+  --paper-id your-paper \
+  --source-url https://ar5iv.labs.arxiv.org/html/... \
   --dry-run
 ```
+
+Remove `--dry-run` when the block count looks right.
 
 ## Re-apply Viewer Style or Restore Tables
 
 If you already have translated HTML and only want to refresh the viewer CSS or restore source tables:
 
 ```bash
-uv run scripts/apply_paper_viewer_style.py \
-  outputs/mmdocrag.ko.paper.html \
-  outputs/mmdocrag.ko.paper.html \
-  inputs/mmdocrag.source.html \
-  --bilingual-output outputs/mmdocrag.ko-en.paper.html
+./paper-translator restyle --paper-id mmdocrag
 ```
 
 ## Scripts
 
-- `scripts/fetch_sources.py`: downloads the configured ar5iv HTML sources.
+- `paper-translator`: CLI wrapper that runs `scripts/paper_translator.py` through `uv`.
+- `scripts/paper_translator.py`: agent-aware CLI for `doctor`, `fetch`, `translate`, `restyle`, and `serve`.
 - `scripts/translate_html_blocks.py`: masks tags, translates text blocks, restores tags, writes paper-viewer HTML.
 - `scripts/apply_paper_viewer_style.py`: reapplies viewer CSS, fixes ar5iv asset links, optionally restores original table HTML.
 
