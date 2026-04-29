@@ -179,6 +179,47 @@ body.has_bilingual_view .codex_tab_button[aria-selected="true"] {
 body.has_bilingual_view .codex_panel[hidden] {
   display: none !important;
 }
+body.has_bilingual_view .codex_parallel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0;
+  background: #fff;
+}
+body.has_bilingual_view .codex_parallel_column {
+  min-width: 0;
+  border-left: 1px solid #eee;
+}
+body.has_bilingual_view .codex_parallel_column:first-child {
+  border-left: 0;
+}
+body.has_bilingual_view .codex_parallel_label {
+  position: sticky;
+  top: 54px;
+  z-index: 10;
+  padding: 6px 12px;
+  background: rgba(255,255,255,0.96);
+  border-bottom: 1px solid #e7e7e7;
+  font: 600 13px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+  color: #555;
+  text-align: center;
+}
+body.has_bilingual_view .codex_parallel .ltx_document {
+  max-width: 760px !important;
+  padding-left: 34px !important;
+  padding-right: 34px !important;
+}
+@media (max-width: 1100px) {
+  body.has_bilingual_view .codex_parallel {
+    grid-template-columns: 1fr;
+  }
+  body.has_bilingual_view .codex_parallel_column {
+    border-left: 0;
+    border-top: 1px solid #eee;
+  }
+  body.has_bilingual_view .codex_parallel_column:first-child {
+    border-top: 0;
+  }
+}
 </style>
 """
 
@@ -386,7 +427,6 @@ def inject_bilingual_assets(soup: BeautifulSoup) -> None:
     head = soup.head or soup.new_tag("head")
     if not soup.head:
         soup.html.insert(0, head)
-    head.append(BeautifulSoup(BILINGUAL_CSS, "lxml"))
     body = soup.body or soup.new_tag("body")
     if not soup.body:
         soup.html.append(body)
@@ -437,7 +477,7 @@ def build_bilingual_view(ko_soup: BeautifulSoup, source_soup: BeautifulSoup) -> 
     nav = out.new_tag("nav")
     nav["class"] = "codex_tabs"
     nav["aria-label"] = "paper language tabs"
-    for label, target, selected in (("한국어", "codex-panel-ko", "true"), ("English", "codex-panel-en", "false")):
+    for label, target, selected in (("한국어", "codex-panel-ko", "true"), ("원본 보기", "codex-panel-parallel", "false")):
         button = out.new_tag("button")
         button["class"] = "codex_tab_button"
         button["data-target"] = target
@@ -448,13 +488,31 @@ def build_bilingual_view(ko_soup: BeautifulSoup, source_soup: BeautifulSoup) -> 
     main = out.new_tag("main")
     ko_panel = out.new_tag("section", id="codex-panel-ko")
     ko_panel["class"] = "codex_panel"
-    en_panel = out.new_tag("section", id="codex-panel-en")
-    en_panel["class"] = "codex_panel"
-    en_panel["hidden"] = ""
+    parallel_panel = out.new_tag("section", id="codex-panel-parallel")
+    parallel_panel["class"] = "codex_panel"
+    parallel_panel["hidden"] = ""
+    parallel = out.new_tag("div")
+    parallel["class"] = "codex_parallel"
+    en_col = out.new_tag("div")
+    en_col["class"] = "codex_parallel_column"
+    ko_col = out.new_tag("div")
+    ko_col["class"] = "codex_parallel_column"
+    en_label = out.new_tag("div")
+    en_label["class"] = "codex_parallel_label"
+    en_label.string = "English original"
+    ko_label = out.new_tag("div")
+    ko_label["class"] = "codex_parallel_label"
+    ko_label.string = "Korean translation"
     ko_panel.append(BeautifulSoup(str(ko_article), "lxml").find("article"))
-    en_panel.append(BeautifulSoup(str(en_article), "lxml").find("article"))
+    en_col.append(en_label)
+    en_col.append(BeautifulSoup(str(en_article), "lxml").find("article"))
+    ko_col.append(ko_label)
+    ko_col.append(BeautifulSoup(str(ko_article), "lxml").find("article"))
+    parallel.append(en_col)
+    parallel.append(ko_col)
+    parallel_panel.append(parallel)
     main.append(ko_panel)
-    main.append(en_panel)
+    main.append(parallel_panel)
     out.body.insert(0, nav)
     out.body.insert(1, main)
     return out

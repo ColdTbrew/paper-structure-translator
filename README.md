@@ -58,7 +58,7 @@ outputs/mmdocrag.ko-en.paper.html
 ```
 
 `*.ko.paper.html` is the Korean-only viewer.  
-`*.ko-en.paper.html` is a two-tab viewer with Korean and English versions side by side through tabs.
+`*.ko-en.paper.html` starts with a Korean-only view. Click `원본 보기` to switch to a two-column reader with English on the left and Korean on the right.
 
 ## Run One Paper
 
