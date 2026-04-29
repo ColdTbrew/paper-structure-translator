@@ -57,7 +57,7 @@ body {
   margin: 0;
   background: #fff;
   color: #252525;
-  font-family: Georgia, "Times New Roman", "Noto Serif KR", serif;
+  font-family: "AppleMyungjo", "Nanum Myeongjo", "Noto Serif CJK KR", "Noto Serif KR", Georgia, "Times New Roman", serif;
   font-size: 19px;
   line-height: 1.48;
 }
@@ -73,6 +73,7 @@ body {
   padding: 54px 46px 96px !important;
   background: #fff;
   min-height: 100vh;
+  font-family: "AppleMyungjo", "Nanum Myeongjo", "Noto Serif CJK KR", "Noto Serif KR", Georgia, "Times New Roman", serif !important;
 }
 .ltx_title_document {
   text-align: center;
@@ -102,6 +103,7 @@ body {
   text-align: justify;
   word-break: keep-all;
   overflow-wrap: break-word;
+  font-family: "AppleMyungjo", "Nanum Myeongjo", "Noto Serif CJK KR", "Noto Serif KR", Georgia, "Times New Roman", serif !important;
 }
 .ltx_abstract {
   margin: 0 0 42px !important;
@@ -123,6 +125,7 @@ body {
   line-height: 1.45 !important;
   text-align: left !important;
   max-width: 820px;
+  font-family: "AppleMyungjo", "Nanum Myeongjo", "Noto Serif CJK KR", "Noto Serif KR", Georgia, "Times New Roman", serif !important;
 }
 table, .ltx_tabular {
   border-collapse: collapse !important;
