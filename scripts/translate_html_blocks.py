@@ -219,6 +219,22 @@ body.has_bilingual_view .codex_tab_button[aria-selected="true"] {
   background: #222;
   color: #fff;
 }
+body.has_bilingual_view .codex_sync_button {
+  appearance: none;
+  border: 1px solid #cfcfcf;
+  background: #fff;
+  color: #222;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font: 600 13px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+  cursor: pointer;
+}
+body.has_bilingual_view .codex_sync_button.is_off {
+  color: #666;
+}
+body.has_bilingual_view .codex_sync_button[hidden] {
+  display: none !important;
+}
 body.has_bilingual_view .codex_panel[hidden] {
   display: none !important;
 }
@@ -227,9 +243,14 @@ body.has_bilingual_view .codex_parallel {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0;
   background: #fff;
+  height: calc(100vh - 57px);
+  overflow: hidden;
 }
 body.has_bilingual_view .codex_parallel_column {
   min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border-left: 1px solid #eee;
 }
 body.has_bilingual_view .codex_parallel_column:first-child {
@@ -254,8 +275,12 @@ body.has_bilingual_view .codex_parallel .ltx_document {
 @media (max-width: 1100px) {
   body.has_bilingual_view .codex_parallel {
     grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
   }
   body.has_bilingual_view .codex_parallel_column {
+    height: auto;
+    overflow: visible;
     border-left: 0;
     border-top: 1px solid #eee;
   }
@@ -272,6 +297,38 @@ BILINGUAL_SCRIPT = """
 document.addEventListener("DOMContentLoaded", function () {
   const buttons = Array.from(document.querySelectorAll(".codex_tab_button"));
   const panels = Array.from(document.querySelectorAll(".codex_panel"));
+  const syncButton = document.querySelector(".codex_sync_button");
+  const columns = Array.from(document.querySelectorAll(".codex_parallel_column"));
+  let syncEnabled = true;
+  let isSyncing = false;
+  let lastScrolledColumn = columns[1] || columns[0];
+  function scrollRatio(element) {
+    const max = element.scrollHeight - element.clientHeight;
+    return max > 0 ? element.scrollTop / max : 0;
+  }
+  function setScrollRatio(element, ratio) {
+    const max = element.scrollHeight - element.clientHeight;
+    element.scrollTop = Math.max(0, Math.min(max, max * ratio));
+  }
+  function syncFrom(source) {
+    if (!source || !syncEnabled || isSyncing || columns.length < 2) return;
+    isSyncing = true;
+    const ratio = scrollRatio(source);
+    columns.forEach((column) => {
+      if (column !== source) setScrollRatio(column, ratio);
+    });
+    window.setTimeout(() => {
+      isSyncing = false;
+    }, 0);
+  }
+  function setSyncEnabled(enabled) {
+    syncEnabled = enabled;
+    if (!syncButton) return;
+    syncButton.textContent = enabled ? "스크롤 동기화 끄기" : "스크롤 동기화 켜기";
+    syncButton.classList.toggle("is_off", !enabled);
+    syncButton.setAttribute("aria-pressed", enabled ? "true" : "false");
+    if (enabled) syncFrom(lastScrolledColumn);
+  }
   function activate(target) {
     buttons.forEach((button) => {
       const selected = button.dataset.target === target;
@@ -280,10 +337,28 @@ document.addEventListener("DOMContentLoaded", function () {
     panels.forEach((panel) => {
       panel.hidden = panel.id !== target;
     });
+    if (syncButton) {
+      syncButton.hidden = target !== "codex-panel-parallel";
+    }
+    if (target === "codex-panel-parallel") {
+      window.scrollTo(0, 0);
+      window.setTimeout(() => syncFrom(lastScrolledColumn), 0);
+    }
   }
   buttons.forEach((button) => {
     button.addEventListener("click", () => activate(button.dataset.target));
   });
+  columns.forEach((column) => {
+    column.addEventListener("scroll", () => {
+      if (isSyncing) return;
+      lastScrolledColumn = column;
+      syncFrom(column);
+    }, { passive: true });
+  });
+  if (syncButton) {
+    syncButton.addEventListener("click", () => setSyncEnabled(!syncEnabled));
+    setSyncEnabled(true);
+  }
   activate("codex-panel-ko");
 });
 </script>
@@ -527,6 +602,13 @@ def build_bilingual_view(ko_soup: BeautifulSoup, source_soup: BeautifulSoup) -> 
         button["aria-selected"] = selected
         button.string = label
         nav.append(button)
+    sync_button = out.new_tag("button")
+    sync_button["class"] = "codex_sync_button"
+    sync_button["type"] = "button"
+    sync_button["aria-pressed"] = "true"
+    sync_button["hidden"] = ""
+    sync_button.string = "스크롤 동기화 끄기"
+    nav.append(sync_button)
 
     main = out.new_tag("main")
     ko_panel = out.new_tag("section", id="codex-panel-ko")
