@@ -42,12 +42,6 @@ If `.env` is missing, do not invent credentials. Run `--dry-run` or ask the user
 
 ## Main Commands
 
-Full configured workflow:
-
-```bash
-./scripts/run_all_block_translations.sh
-```
-
 Fetch source HTML:
 
 ```bash
@@ -96,7 +90,7 @@ uv run scripts/apply_paper_viewer_style.py \
 
 - Use `scripts/translate_html_blocks.py` for translation, masking, bilingual viewer, and CSS behavior.
 - Use `scripts/apply_paper_viewer_style.py` for regenerating final viewer HTML from already translated HTML.
-- Add or change configured source URLs in `scripts/fetch_sources.py` and `scripts/run_all_block_translations.sh`.
+- Add or change configured source URLs in `scripts/fetch_sources.py`, or place an ar5iv HTML file directly under `inputs/`.
 - Keep `figure.ltx_table` out of model calls.
 - Preserve HTML tags with the mask/restore path.
 - Keep generated HTML under `outputs/`; it is ignored by git.

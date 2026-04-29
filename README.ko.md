@@ -54,43 +54,13 @@ OPENAI_BASE_URL=http://host:port/v1
 
 ## 빠른 시작
 
-설정된 전체 파이프라인을 실행합니다.
-
-```bash
-./scripts/run_all_block_translations.sh
-```
-
-이 명령은 다음 작업을 수행합니다.
-
-1. 설정된 ar5iv HTML 파일을 `inputs/` 아래에 다운로드합니다.
-2. 표가 아닌 텍스트 블록을 마스킹한 뒤 번역합니다.
-3. 원본 HTML 태그를 복원합니다.
-4. 표 HTML은 원본 그대로 유지합니다.
-5. 최종 논문 리더 HTML을 `outputs/` 아래에 작성합니다.
-
-현재 설정된 출력물은 다음과 같습니다.
-
-```text
-outputs/mmlongbench-doc.ko.paper.html
-outputs/mmlongbench-doc.ko-en.paper.html
-outputs/longdocurl.ko.paper.html
-outputs/longdocurl.ko-en.paper.html
-outputs/mmdocrag.ko.paper.html
-outputs/mmdocrag.ko-en.paper.html
-```
-
-`*.ko.paper.html`은 한국어 단독 리더입니다.  
-`*.ko-en.paper.html`은 처음에는 한국어 단독 보기로 열립니다. `원본 보기`를 클릭하면 왼쪽 영어, 오른쪽 한국어의 2열 병행 리더로 전환됩니다.
-
-## 논문 하나만 실행하기
-
 먼저 소스 HTML을 가져옵니다.
 
 ```bash
 uv run scripts/fetch_sources.py
 ```
 
-드라이런:
+모델을 호출하기 전에 드라이런으로 블록 수를 확인합니다.
 
 ```bash
 uv run scripts/translate_html_blocks.py \
@@ -104,7 +74,7 @@ uv run scripts/translate_html_blocks.py \
   --dry-run
 ```
 
-실제 실행:
+그다음 실제 번역을 실행합니다.
 
 ```bash
 PYTHONUNBUFFERED=1 uv run scripts/translate_html_blocks.py \
@@ -116,6 +86,32 @@ PYTHONUNBUFFERED=1 uv run scripts/translate_html_blocks.py \
   --model gpt-5.4-mini \
   --env-file .env \
   --max-chars 5000
+```
+
+출력 파일은 다음과 같습니다.
+
+```text
+outputs/mmdocrag.ko.paper.html
+outputs/mmdocrag.ko-en.paper.html
+```
+
+`*.ko.paper.html`은 한국어 단독 리더입니다.  
+`*.ko-en.paper.html`은 처음에는 한국어 단독 보기로 열립니다. `원본 보기`를 클릭하면 왼쪽 영어, 오른쪽 한국어의 2열 병행 리더로 전환됩니다.
+
+## 다른 논문 번역하기
+
+ar5iv HTML 파일을 `inputs/` 아래에 추가하거나 가져온 뒤, 그 파일을 `scripts/translate_html_blocks.py`에 넘깁니다.
+
+```bash
+uv run scripts/translate_html_blocks.py \
+  --input inputs/your-paper.source.html \
+  --output outputs/your-paper.ko.paper.html \
+  --bilingual-output outputs/your-paper.ko-en.paper.html \
+  --cache outputs/cache/your-paper.masked.translation.jsonl \
+  --progress-log outputs/cache/your-paper.masked.progress.log \
+  --model gpt-5.4-mini \
+  --env-file .env \
+  --dry-run
 ```
 
 ## 리더 스타일 재적용 또는 표 복원
@@ -135,7 +131,6 @@ uv run scripts/apply_paper_viewer_style.py \
 - `scripts/fetch_sources.py`: 설정된 ar5iv HTML 소스를 다운로드합니다.
 - `scripts/translate_html_blocks.py`: 태그를 마스킹하고, 텍스트 블록을 번역하고, 태그를 복원한 뒤 논문 리더 HTML을 작성합니다.
 - `scripts/apply_paper_viewer_style.py`: 리더 CSS를 다시 적용하고, ar5iv asset 링크를 고치며, 선택적으로 원본 표 HTML을 복원합니다.
-- `scripts/run_all_block_translations.sh`: 설정된 전체 워크플로를 실행합니다.
 
 ## 참고
 

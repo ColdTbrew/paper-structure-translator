@@ -6,7 +6,7 @@ If a user gives you only this repository URL, use this file as the operating gui
 
 1. Set up with `uv sync`.
 2. Ask the user for `OPENAI_API_KEY` and `OPENAI_BASE_URL` if `.env` is not already present.
-3. Run `./scripts/run_all_block_translations.sh` for the configured papers, or run `scripts/translate_html_blocks.py` for one paper.
+3. Run `scripts/fetch_sources.py`, then `scripts/translate_html_blocks.py` for the target paper.
 4. Verify generated HTML in a real browser.
 5. Never commit `.env`, `inputs/`, `outputs/`, or cache files unless the user explicitly changes the repo policy.
 
@@ -31,7 +31,6 @@ The pipeline should:
 - `scripts/fetch_sources.py`: downloads configured ar5iv source HTML into `inputs/`.
 - `scripts/translate_html_blocks.py`: masks HTML tags, translates text blocks, restores tags, and writes viewer HTML.
 - `scripts/apply_paper_viewer_style.py`: reapplies viewer CSS and restores source tables without calling the model.
-- `scripts/run_all_block_translations.sh`: runs the configured end-to-end workflow.
 - `skills/paper-structure-translator/SKILL.md`: reusable skill instructions for agents.
 
 ## Setup
@@ -51,25 +50,6 @@ OPENAI_BASE_URL=http://host:port/v1
 ```
 
 Do not invent or commit secrets. If credentials are missing, run only non-network verification or `--dry-run`, then ask the user for the missing values.
-
-## Full Workflow
-
-```bash
-./scripts/run_all_block_translations.sh
-```
-
-This downloads sources, translates all configured papers, restores table HTML, and writes final files under `outputs/`.
-
-Expected outputs:
-
-```text
-outputs/mmlongbench-doc.ko.paper.html
-outputs/mmlongbench-doc.ko-en.paper.html
-outputs/longdocurl.ko.paper.html
-outputs/longdocurl.ko-en.paper.html
-outputs/mmdocrag.ko.paper.html
-outputs/mmdocrag.ko-en.paper.html
-```
 
 ## One-Paper Workflow
 

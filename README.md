@@ -54,43 +54,13 @@ OPENAI_BASE_URL=http://host:port/v1
 
 ## Quick Start
 
-Run the full configured pipeline:
-
-```bash
-./scripts/run_all_block_translations.sh
-```
-
-This will:
-
-1. Download configured ar5iv HTML files into `inputs/`.
-2. Translate masked non-table text blocks.
-3. Restore the original HTML tags.
-4. Keep table HTML unchanged.
-5. Write final paper-viewer HTML files under `outputs/`.
-
-Current configured outputs:
-
-```text
-outputs/mmlongbench-doc.ko.paper.html
-outputs/mmlongbench-doc.ko-en.paper.html
-outputs/longdocurl.ko.paper.html
-outputs/longdocurl.ko-en.paper.html
-outputs/mmdocrag.ko.paper.html
-outputs/mmdocrag.ko-en.paper.html
-```
-
-`*.ko.paper.html` is the Korean-only viewer.  
-`*.ko-en.paper.html` starts with a Korean-only view. Click `원본 보기` to switch to a two-column reader with English on the left and Korean on the right.
-
-## Run One Paper
-
 Fetch source HTML first:
 
 ```bash
 uv run scripts/fetch_sources.py
 ```
 
-Dry run:
+Run a dry run to inspect block counts before calling the model:
 
 ```bash
 uv run scripts/translate_html_blocks.py \
@@ -104,7 +74,7 @@ uv run scripts/translate_html_blocks.py \
   --dry-run
 ```
 
-Actual run:
+Then run the translation:
 
 ```bash
 PYTHONUNBUFFERED=1 uv run scripts/translate_html_blocks.py \
@@ -116,6 +86,32 @@ PYTHONUNBUFFERED=1 uv run scripts/translate_html_blocks.py \
   --model gpt-5.4-mini \
   --env-file .env \
   --max-chars 5000
+```
+
+The output files are:
+
+```text
+outputs/mmdocrag.ko.paper.html
+outputs/mmdocrag.ko-en.paper.html
+```
+
+`*.ko.paper.html` is the Korean-only viewer.  
+`*.ko-en.paper.html` starts with a Korean-only view. Click `원본 보기` to switch to a two-column reader with English on the left and Korean on the right.
+
+## Translate Another Paper
+
+Add or fetch an ar5iv HTML file under `inputs/`, then pass that file to `scripts/translate_html_blocks.py`.
+
+```bash
+uv run scripts/translate_html_blocks.py \
+  --input inputs/your-paper.source.html \
+  --output outputs/your-paper.ko.paper.html \
+  --bilingual-output outputs/your-paper.ko-en.paper.html \
+  --cache outputs/cache/your-paper.masked.translation.jsonl \
+  --progress-log outputs/cache/your-paper.masked.progress.log \
+  --model gpt-5.4-mini \
+  --env-file .env \
+  --dry-run
 ```
 
 ## Re-apply Viewer Style or Restore Tables
@@ -135,7 +131,6 @@ uv run scripts/apply_paper_viewer_style.py \
 - `scripts/fetch_sources.py`: downloads the configured ar5iv HTML sources.
 - `scripts/translate_html_blocks.py`: masks tags, translates text blocks, restores tags, writes paper-viewer HTML.
 - `scripts/apply_paper_viewer_style.py`: reapplies viewer CSS, fixes ar5iv asset links, optionally restores original table HTML.
-- `scripts/run_all_block_translations.sh`: runs the configured end-to-end workflow.
 
 ## Notes
 

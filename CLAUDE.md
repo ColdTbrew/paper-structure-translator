@@ -11,7 +11,7 @@ This project converts ar5iv HTML into faithful Korean paper-reader HTML while pr
 1. Read `AGENTS.md`, `README.md`, and `README.ko.md`.
 2. Use `uv sync` for setup.
 3. Require a local `.env` with `OPENAI_API_KEY` and `OPENAI_BASE_URL` for real translation runs.
-4. Use `./scripts/run_all_block_translations.sh` for the configured three-paper workflow.
+4. Use `scripts/fetch_sources.py`, then `scripts/translate_html_blocks.py` for the target paper.
 5. Use `scripts/apply_paper_viewer_style.py` for CSS/table/viewer-only fixes without calling the model.
 6. Verify generated HTML in a browser before reporting success.
 
@@ -28,7 +28,7 @@ This project converts ar5iv HTML into faithful Korean paper-reader HTML while pr
 ```bash
 uv sync
 uv run python -m py_compile scripts/*.py
-./scripts/run_all_block_translations.sh
+uv run scripts/fetch_sources.py
 ```
 
 Style-only refresh:
@@ -40,4 +40,3 @@ uv run scripts/apply_paper_viewer_style.py \
   inputs/mmdocrag.source.html \
   --bilingual-output outputs/mmdocrag.ko-en.paper.html
 ```
-
