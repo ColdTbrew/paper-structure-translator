@@ -9,7 +9,9 @@ The pipeline is designed for papers where figures, tables, equations, citations,
 - Downloads ar5iv HTML sources for configured papers.
 - Builds Korean structure-reader pages with headings, figures, tables, and local image assets.
 - Translates HTML text nodes in chunks with an OpenAI-compatible `chat/completions` API.
+- Masks HTML tags before calling the model, translates only the text between tags, and restores the original tags afterward.
 - Preserves `script`, `style`, `code`, `pre`, `math`, `svg`, links, figures, tables, and DOM structure.
+- Keeps ar5iv table HTML unchanged by default to save tokens and avoid table breakage.
 - Stores translation cache as JSONL so interrupted runs can resume.
 
 ## Setup
@@ -60,10 +62,10 @@ uv run scripts/translate_html_chunks.py \
   --dry-run
 ```
 
-Run all configured papers:
+Run all configured papers with the paper-viewer output style:
 
 ```bash
-./scripts/run_all_literal_translations.sh
+./scripts/run_all_block_translations.sh
 ```
 
 Progress is printed immediately and also written under `outputs/cache/*.progress.log`.

@@ -1,6 +1,8 @@
 # GPT-5.4-mini 청크 단위 논문 HTML 직역 프로세스
 
-목표: 논문 HTML의 DOM 구조, 이미지, 표, 수식, 링크를 유지하고 텍스트 노드만 청크 단위로 한국어 직역한다.
+목표: 논문 HTML의 DOM 구조, 이미지, 표, 수식, 링크를 유지하고 태그 사이의 본문 텍스트만 청크 단위로 한국어 직역한다.
+
+현재 권장 경로는 `scripts/translate_html_blocks.py`이다. 이 스크립트는 HTML 태그를 placeholder로 마스킹한 뒤 LLM에는 태그 사이 텍스트 중심의 masked fragment만 보낸다. `figure.ltx_table` 내부 표 HTML은 LLM에 보내지 않고 원문 그대로 유지한다.
 
 ## 비밀값 관리
 
