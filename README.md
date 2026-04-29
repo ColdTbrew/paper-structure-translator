@@ -4,6 +4,16 @@ OpenAI-compatible pipeline for making clean Korean paper-viewer HTML from ar5iv 
 
 The goal is not to summarize a paper. The goal is to keep the paper readable like a normal article page while translating the body text as literally as possible.
 
+## Preview
+
+The generated HTML is meant to feel like a quiet paper reader: figures and tables stay in place, citations remain clickable, and the translated body text is easy to read line by line.
+
+| Korean reader | English/Korean parallel reader |
+| --- | --- |
+| ![Korean paper reader](docs/korean-reader.png) | ![English and Korean parallel paper reader](docs/parallel-reader.png) |
+
+The bilingual output includes an `원본 보기` mode with English on the left and Korean on the right. Scroll sync is enabled by default, but you can turn it off, adjust either side manually, then turn it back on to resync from the current position.
+
 ## Features
 
 - Uses ar5iv HTML instead of PDF parsing.
@@ -12,6 +22,8 @@ The goal is not to summarize a paper. The goal is to keep the paper readable lik
 - Keeps `figure.ltx_table` table HTML unchanged to save tokens and avoid breaking tables.
 - Preserves links, citations, figures, equations, code/pre/math blocks, and document structure.
 - Adds a clean paper-viewer style: centered white page, white background, readable typography.
+- Writes Korean-only HTML and bilingual English/Korean HTML.
+- Provides a two-column bilingual reader with optional scroll sync.
 - Writes JSONL caches so interrupted runs can resume.
 
 ## Setup
