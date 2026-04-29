@@ -28,6 +28,14 @@ The bilingual output includes an `원본 보기` mode with English on the left a
 - Provides a two-column bilingual reader with optional scroll sync.
 - Writes JSONL caches so interrupted runs can resume.
 
+## Agent Ready
+
+This repository includes instructions for coding agents. If you are using Codex, Claude Code, or a similar agent, give it this repository URL and point it to:
+
+- `AGENTS.md` for the full agent operating guide.
+- `CLAUDE.md` for Claude Code-specific defaults.
+- `skills/paper-structure-translator/SKILL.md` for reusable skill-style instructions.
+
 ## Setup
 
 ```bash

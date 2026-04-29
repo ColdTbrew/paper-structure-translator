@@ -28,6 +28,14 @@ ar5iv HTML을 입력으로 받아, 깔끔한 한국어 논문 리더 HTML을 만
 - 병행 리더에서 선택 가능한 스크롤 동기화를 제공합니다.
 - JSONL 캐시를 작성해 중단된 번역 작업을 이어서 실행할 수 있습니다.
 
+## 에이전트 바로 사용
+
+이 레포지토리에는 코딩 에이전트용 설명서가 포함되어 있습니다. Codex, Claude Code 같은 에이전트에게 이 레포 주소를 전달한 뒤 다음 파일을 읽게 하면 바로 작업을 시작할 수 있습니다.
+
+- `AGENTS.md`: 전체 에이전트 작업 가이드
+- `CLAUDE.md`: Claude Code 전용 기본 지침
+- `skills/paper-structure-translator/SKILL.md`: 재사용 가능한 skill 형식 지침
+
 ## 설정
 
 ```bash
