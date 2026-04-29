@@ -136,6 +136,37 @@ body {
   height: auto !important;
   margin: 0 auto;
 }
+.ltx_picture {
+  display: block !important;
+  max-width: 100% !important;
+  height: auto !important;
+  margin: 24px auto !important;
+  overflow: hidden !important;
+}
+svg.ltx_picture {
+  font-family: Arial, sans-serif !important;
+  font-size: 6px !important;
+  line-height: 1.08 !important;
+}
+svg.ltx_picture .ltx_p {
+  display: block;
+  margin: 0 0 2px !important;
+  text-align: left !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
+svg.ltx_picture .ltx_text,
+svg.ltx_picture .ltx_inline-block {
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
+svg.ltx_picture .ltx_inline-block {
+  max-width: 100%;
+}
 .ltx_caption {
   margin: 12px auto 0 !important;
   font-size: 16px !important;
