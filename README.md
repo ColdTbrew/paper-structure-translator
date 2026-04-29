@@ -50,9 +50,15 @@ Current configured outputs:
 
 ```text
 outputs/mmlongbench-doc.ko.paper.html
+outputs/mmlongbench-doc.ko-en.paper.html
 outputs/longdocurl.ko.paper.html
+outputs/longdocurl.ko-en.paper.html
 outputs/mmdocrag.ko.paper.html
+outputs/mmdocrag.ko-en.paper.html
 ```
+
+`*.ko.paper.html` is the Korean-only viewer.  
+`*.ko-en.paper.html` is a two-tab viewer with Korean and English versions side by side through tabs.
 
 ## Run One Paper
 
@@ -68,6 +74,7 @@ Dry run:
 uv run scripts/translate_html_blocks.py \
   --input inputs/mmdocrag.source.html \
   --output outputs/mmdocrag.ko.paper.html \
+  --bilingual-output outputs/mmdocrag.ko-en.paper.html \
   --cache outputs/cache/mmdocrag.masked.translation.jsonl \
   --progress-log outputs/cache/mmdocrag.masked.progress.log \
   --model gpt-5.4-mini \
@@ -81,6 +88,7 @@ Actual run:
 PYTHONUNBUFFERED=1 uv run scripts/translate_html_blocks.py \
   --input inputs/mmdocrag.source.html \
   --output outputs/mmdocrag.ko.paper.html \
+  --bilingual-output outputs/mmdocrag.ko-en.paper.html \
   --cache outputs/cache/mmdocrag.masked.translation.jsonl \
   --progress-log outputs/cache/mmdocrag.masked.progress.log \
   --model gpt-5.4-mini \
@@ -96,7 +104,8 @@ If you already have translated HTML and only want to refresh the viewer CSS or r
 uv run scripts/apply_paper_viewer_style.py \
   outputs/mmdocrag.ko.paper.html \
   outputs/mmdocrag.ko.paper.html \
-  inputs/mmdocrag.source.html
+  inputs/mmdocrag.source.html \
+  --bilingual-output outputs/mmdocrag.ko-en.paper.html
 ```
 
 ## Scripts

@@ -148,6 +148,64 @@ a { color: #174ea6; text-decoration-thickness: 1px; text-underline-offset: 2px; 
 """
 
 
+BILINGUAL_CSS = """
+<style id="codex-bilingual-viewer-style">
+body.has_bilingual_view .codex_tabs {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.96);
+  border-bottom: 1px solid #e5e5e5;
+}
+body.has_bilingual_view .codex_tab_button {
+  appearance: none;
+  border: 1px solid #cfcfcf;
+  background: #fff;
+  color: #222;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font: 600 14px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+  cursor: pointer;
+}
+body.has_bilingual_view .codex_tab_button[aria-selected="true"] {
+  border-color: #222;
+  background: #222;
+  color: #fff;
+}
+body.has_bilingual_view .codex_panel[hidden] {
+  display: none !important;
+}
+</style>
+"""
+
+
+BILINGUAL_SCRIPT = """
+<script id="codex-bilingual-viewer-script">
+document.addEventListener("DOMContentLoaded", function () {
+  const buttons = Array.from(document.querySelectorAll(".codex_tab_button"));
+  const panels = Array.from(document.querySelectorAll(".codex_panel"));
+  function activate(target) {
+    buttons.forEach((button) => {
+      const selected = button.dataset.target === target;
+      button.setAttribute("aria-selected", selected ? "true" : "false");
+    });
+    panels.forEach((panel) => {
+      panel.hidden = panel.id !== target;
+    });
+  }
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => activate(button.dataset.target));
+  });
+  activate("codex-panel-ko");
+});
+</script>
+"""
+
+
 def load_env_file(path: Path) -> None:
     if not path.exists():
         return
@@ -315,7 +373,29 @@ def inject_style(soup: BeautifulSoup) -> None:
     head = soup.head or soup.new_tag("head")
     if not soup.head:
         soup.html.insert(0, head)
-    head.append(BeautifulSoup(PAPER_CSS, "lxml"))
+    style_tag = BeautifulSoup(PAPER_CSS, "lxml").find("style")
+    if style_tag:
+        head.append(style_tag)
+
+
+def inject_bilingual_assets(soup: BeautifulSoup) -> None:
+    for element_id in ("codex-bilingual-viewer-style", "codex-bilingual-viewer-script"):
+        existing = soup.find(id=element_id)
+        if existing:
+            existing.decompose()
+    head = soup.head or soup.new_tag("head")
+    if not soup.head:
+        soup.html.insert(0, head)
+    head.append(BeautifulSoup(BILINGUAL_CSS, "lxml"))
+    body = soup.body or soup.new_tag("body")
+    if not soup.body:
+        soup.html.append(body)
+    style_tag = BeautifulSoup(BILINGUAL_CSS, "lxml").find("style")
+    script_tag = BeautifulSoup(BILINGUAL_SCRIPT, "lxml").find("script")
+    if style_tag:
+        head.append(style_tag)
+    if script_tag:
+        body.append(script_tag)
 
 
 def fix_file_viewer_links(soup: BeautifulSoup) -> None:
@@ -326,6 +406,58 @@ def fix_file_viewer_links(soup: BeautifulSoup) -> None:
             continue
         if value.startswith("/html/") or value.startswith("/assets/"):
             tag[attr] = "https://ar5iv.labs.arxiv.org" + value
+
+
+def build_bilingual_view(ko_soup: BeautifulSoup, source_soup: BeautifulSoup) -> BeautifulSoup:
+    source_copy = BeautifulSoup(str(source_soup), "lxml")
+    inject_style(ko_soup)
+    inject_style(source_copy)
+    fix_file_viewer_links(ko_soup)
+    fix_file_viewer_links(source_copy)
+
+    ko_article = ko_soup.select_one("article.ltx_document")
+    en_article = source_copy.select_one("article.ltx_document")
+    if not ko_article or not en_article:
+        raise RuntimeError("Could not find article.ltx_document in source or translated HTML")
+
+    out = BeautifulSoup("<!doctype html><html lang=\"ko\"><head></head><body class=\"has_bilingual_view\"></body></html>", "lxml")
+    meta_charset = out.new_tag("meta", charset="utf-8")
+    meta_viewport = out.new_tag("meta")
+    meta_viewport["name"] = "viewport"
+    meta_viewport["content"] = "width=device-width, initial-scale=1"
+    out.head.append(meta_charset)
+    out.head.append(meta_viewport)
+    title = ko_soup.find("title")
+    if title:
+        out.head.append(BeautifulSoup(str(title), "lxml").find("title"))
+    for style in ko_soup.find_all("style", id=["codex-paper-viewer-style"]):
+        out.head.append(BeautifulSoup(str(style), "lxml").find("style"))
+    inject_bilingual_assets(out)
+
+    nav = out.new_tag("nav")
+    nav["class"] = "codex_tabs"
+    nav["aria-label"] = "paper language tabs"
+    for label, target, selected in (("한국어", "codex-panel-ko", "true"), ("English", "codex-panel-en", "false")):
+        button = out.new_tag("button")
+        button["class"] = "codex_tab_button"
+        button["data-target"] = target
+        button["aria-selected"] = selected
+        button.string = label
+        nav.append(button)
+
+    main = out.new_tag("main")
+    ko_panel = out.new_tag("section", id="codex-panel-ko")
+    ko_panel["class"] = "codex_panel"
+    en_panel = out.new_tag("section", id="codex-panel-en")
+    en_panel["class"] = "codex_panel"
+    en_panel["hidden"] = ""
+    ko_panel.append(BeautifulSoup(str(ko_article), "lxml").find("article"))
+    en_panel.append(BeautifulSoup(str(en_article), "lxml").find("article"))
+    main.append(ko_panel)
+    main.append(en_panel)
+    out.body.insert(0, nav)
+    out.body.insert(1, main)
+    return out
 
 
 def main(argv: list[str]) -> None:
@@ -339,6 +471,7 @@ def main(argv: list[str]) -> None:
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--progress-log", default="")
+    parser.add_argument("--bilingual-output", default="", help="Optional HTML output with Korean and English tabs")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -413,6 +546,14 @@ def main(argv: list[str]) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(str(soup), encoding="utf-8")
     log(f"wrote {output_path}")
+
+    if args.bilingual_output:
+        source_soup = BeautifulSoup(input_path.read_text(encoding="utf-8"), "lxml")
+        bilingual = build_bilingual_view(BeautifulSoup(str(soup), "lxml"), source_soup)
+        bilingual_path = Path(args.bilingual_output).resolve()
+        bilingual_path.parent.mkdir(parents=True, exist_ok=True)
+        bilingual_path.write_text(str(bilingual), encoding="utf-8")
+        log(f"wrote {bilingual_path}")
 
 
 if __name__ == "__main__":
