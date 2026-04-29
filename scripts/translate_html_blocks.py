@@ -111,7 +111,7 @@ body {
 .ltx_figure, .ltx_table {
   margin: 42px auto !important;
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: visible;
 }
 .ltx_figure img, .ltx_graphics {
   display: block;
@@ -131,15 +131,21 @@ table, .ltx_tabular {
   border-collapse: collapse !important;
   margin-left: auto !important;
   margin-right: auto !important;
-  font-size: 16px;
-  line-height: 1.35;
+  width: 100% !important;
+  max-width: 100% !important;
+  table-layout: auto !important;
+  font-size: clamp(10px, 1.18vw, 15px);
+  line-height: 1.25;
   border-top: 1.5px solid #333 !important;
   border-bottom: 1.5px solid #333 !important;
 }
 td, th, .ltx_td, .ltx_th {
-  padding: 4px 8px !important;
+  padding: 3px 5px !important;
   vertical-align: middle;
   border: 1px solid #8e8e8e !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 thead td, thead th, .ltx_tr:first-child > .ltx_td, .ltx_tr:first-child > .ltx_th {
   border-bottom: 1.5px solid #333 !important;
