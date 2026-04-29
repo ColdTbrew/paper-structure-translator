@@ -1,24 +1,22 @@
 # Structure-Preserving Paper Translator
 
-Chunked, literal Korean translation pipeline for academic paper HTML.
+OpenAI-compatible pipeline for making clean Korean paper-viewer HTML from ar5iv HTML.
 
-The pipeline is designed for papers where figures, tables, equations, citations, and section structure should remain readable while text is translated line by line. It works best with ar5iv HTML because the LaTeX-derived structure is usually cleaner than PDF text extraction.
+The goal is not to summarize a paper. The goal is to keep the paper readable like a normal article page while translating the body text as literally as possible.
 
-## What It Does
+## Features
 
-- Downloads ar5iv HTML sources for configured papers.
-- Builds Korean structure-reader pages with headings, figures, tables, and local image assets.
-- Translates HTML text nodes in chunks with an OpenAI-compatible `chat/completions` API.
-- Masks HTML tags before calling the model, translates only the text between tags, and restores the original tags afterward.
-- Preserves `script`, `style`, `code`, `pre`, `math`, `svg`, links, figures, tables, and DOM structure.
-- Keeps ar5iv table HTML unchanged by default to save tokens and avoid table breakage.
-- Stores translation cache as JSONL so interrupted runs can resume.
+- Uses ar5iv HTML instead of PDF parsing.
+- Masks HTML tags before calling the model, then restores the exact tags after translation.
+- Sends only translatable text blocks to the model.
+- Keeps `figure.ltx_table` table HTML unchanged to save tokens and avoid breaking tables.
+- Preserves links, citations, figures, equations, code/pre/math blocks, and document structure.
+- Adds a clean paper-viewer style: centered white page, white background, readable typography.
+- Writes JSONL caches so interrupted runs can resume.
 
 ## Setup
 
 ```bash
-uv venv .venv
-source .venv/bin/activate
 uv sync
 cp .env.example .env
 ```
@@ -30,46 +28,84 @@ OPENAI_API_KEY=...
 OPENAI_BASE_URL=http://host:port/v1
 ```
 
-Do not commit `.env`.
+`.env`, downloaded sources, caches, and generated HTML outputs are ignored by git.
 
-## Build Structure Readers
+## Quick Start
 
-```bash
-uv run scripts/build_structure_preserving_readers.py
-```
-
-This creates:
-
-- `inputs/*.source.html`
-- `outputs/*.ko.reader.html`
-- `outputs/*.ko.reader.md`
-- `assets/<paper>/figure-*.png`
-- `outputs/translation_log.md`
-
-Generated paper sources, images, and outputs are ignored by git.
-
-## Run Literal Chunk Translation
-
-Dry run first:
-
-```bash
-uv run scripts/translate_html_chunks.py \
-  --input inputs/mmlongbench-doc.source.html \
-  --output outputs/mmlongbench-doc.ko.literal.html \
-  --cache outputs/cache/mmlongbench-doc.translation.jsonl \
-  --model gpt-5.4-mini \
-  --env-file .env \
-  --dry-run
-```
-
-Run all configured papers with the paper-viewer output style:
+Run the full configured pipeline:
 
 ```bash
 ./scripts/run_all_block_translations.sh
 ```
 
-Progress is printed immediately and also written under `outputs/cache/*.progress.log`.
+This will:
+
+1. Download configured ar5iv HTML files into `inputs/`.
+2. Translate masked non-table text blocks.
+3. Restore the original HTML tags.
+4. Keep table HTML unchanged.
+5. Write final paper-viewer HTML files under `outputs/`.
+
+Current configured outputs:
+
+```text
+outputs/mmlongbench-doc.ko.paper.html
+outputs/longdocurl.ko.paper.html
+outputs/mmdocrag.ko.paper.html
+```
+
+## Run One Paper
+
+Fetch source HTML first:
+
+```bash
+uv run scripts/fetch_sources.py
+```
+
+Dry run:
+
+```bash
+uv run scripts/translate_html_blocks.py \
+  --input inputs/mmdocrag.source.html \
+  --output outputs/mmdocrag.ko.paper.html \
+  --cache outputs/cache/mmdocrag.masked.translation.jsonl \
+  --progress-log outputs/cache/mmdocrag.masked.progress.log \
+  --model gpt-5.4-mini \
+  --env-file .env \
+  --dry-run
+```
+
+Actual run:
+
+```bash
+PYTHONUNBUFFERED=1 uv run scripts/translate_html_blocks.py \
+  --input inputs/mmdocrag.source.html \
+  --output outputs/mmdocrag.ko.paper.html \
+  --cache outputs/cache/mmdocrag.masked.translation.jsonl \
+  --progress-log outputs/cache/mmdocrag.masked.progress.log \
+  --model gpt-5.4-mini \
+  --env-file .env \
+  --max-chars 5000
+```
+
+## Re-apply Viewer Style or Restore Tables
+
+If you already have translated HTML and only want to refresh the viewer CSS or restore source tables:
+
+```bash
+uv run scripts/apply_paper_viewer_style.py \
+  outputs/mmdocrag.ko.paper.html \
+  outputs/mmdocrag.ko.paper.html \
+  inputs/mmdocrag.source.html
+```
+
+## Scripts
+
+- `scripts/fetch_sources.py`: downloads the configured ar5iv HTML sources.
+- `scripts/translate_html_blocks.py`: masks tags, translates text blocks, restores tags, writes paper-viewer HTML.
+- `scripts/apply_paper_viewer_style.py`: reapplies viewer CSS, fixes ar5iv asset links, optionally restores original table HTML.
+- `scripts/run_all_block_translations.sh`: runs the configured end-to-end workflow.
 
 ## Notes
 
-This project intentionally avoids committing full translated papers, source HTML downloads, caches, or API secrets. Use it for documents you have the right to translate and keep generated outputs local unless redistribution is permitted.
+Use this for documents you have the right to translate. Full translated paper outputs should stay local unless redistribution is permitted.

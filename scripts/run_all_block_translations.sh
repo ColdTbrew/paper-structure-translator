@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+uv run scripts/fetch_sources.py
+
 PYTHONUNBUFFERED=1 uv run scripts/translate_html_blocks.py \
   --input inputs/mmlongbench-doc.source.html \
   --output outputs/mmlongbench-doc.ko.paper.html \
