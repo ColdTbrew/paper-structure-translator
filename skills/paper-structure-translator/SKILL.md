@@ -8,6 +8,8 @@ Use this skill when a user wants to run, modify, debug, or extend the structure-
 - "Make the paper viewer"
 - "Fix the bilingual reader"
 - "Restore tables without retranslating"
+- "Import this PDF"
+- "Translate this Hugging Face PDF"
 - "Run the paper-structure-translator repo"
 - "Use this repo to translate papers"
 
@@ -56,6 +58,23 @@ Fetch source HTML:
   --source-url https://ar5iv.labs.arxiv.org/html/2505.16470v2 \
   --json
 ```
+
+Import PDF-only sources:
+
+```bash
+./paper-translator pdf-import \
+  --paper-id deepseek-v4 \
+  --pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf \
+  --title "DeepSeek V4" \
+  --json
+```
+
+Notes:
+
+- Prefer ar5iv HTML when available.
+- `pdf-import` requires PyMuPDF. If it is missing, ask for approval before installing and then run `uv add pymupdf`.
+- Hugging Face `/blob/...` PDF URLs are normalized to `/resolve/...`.
+- PDF import preserves page images and extracts text blocks; it is less structure-rich than ar5iv HTML.
 
 One-paper dry run:
 

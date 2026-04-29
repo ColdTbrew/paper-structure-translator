@@ -6,7 +6,7 @@ If a user gives you only this repository URL, use this file as the operating gui
 
 1. Set up with `uv sync`.
 2. Ask the user for `OPENAI_API_KEY` and `OPENAI_BASE_URL` if `.env` is not already present.
-3. Use `./paper-translator` for `doctor`, `fetch`, `translate`, `restyle`, and `serve`.
+3. Use `./paper-translator` for `doctor`, `fetch`, `pdf-import`, `translate`, `restyle`, and `serve`.
 4. Verify generated HTML in a real browser.
 5. Never commit `.env`, `inputs/`, `outputs/`, or cache files unless the user explicitly changes the repo policy.
 
@@ -16,7 +16,7 @@ The output is not a summary. It is a faithful Korean translation in a clean pape
 
 The pipeline should:
 
-- Use ar5iv HTML as the source, not PDF/OCR.
+- Prefer ar5iv HTML as the source. If only a PDF is available, use `pdf-import` to create image-backed source HTML first.
 - Preserve document structure, links, citations, figures, equations, and code/pre/math blocks.
 - Translate normal text blocks as literally as possible.
 - Keep `figure.ltx_table` HTML unchanged and restore tables from source HTML.
@@ -68,6 +68,18 @@ Fetch source HTML with explicit flags:
   --source-url https://ar5iv.labs.arxiv.org/html/2505.16470v2 \
   --json
 ```
+
+For PDF-only papers, first import the PDF. This requires PyMuPDF; if missing, tell the user to approve/install it with `uv add pymupdf`.
+
+```bash
+./paper-translator pdf-import \
+  --paper-id deepseek-v4 \
+  --pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf \
+  --title "DeepSeek V4" \
+  --json
+```
+
+The command normalizes Hugging Face `/blob/...` URLs to `/resolve/...`, stores the PDF under `inputs/pdfs/`, renders page PNGs under `inputs/assets/<paper-id>/`, and writes `inputs/<paper-id>.source.html`.
 
 Dry run before calling the model:
 

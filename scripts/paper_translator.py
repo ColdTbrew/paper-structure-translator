@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import html
 import http.server
 import json
 import os
+import re
 import socketserver
 import sys
 from pathlib import Path
@@ -117,6 +119,167 @@ def fetch_source(source_url: str, output_path: Path, force: bool, dry_run: bool)
     }
 
 
+def normalize_huggingface_pdf_url(url: str) -> str:
+    return re.sub(r"/blob/([^?#]+)", r"/resolve/\1", url)
+
+
+def download_binary(source_url: str, output_path: Path, force: bool, dry_run: bool) -> dict[str, Any]:
+    url = normalize_huggingface_pdf_url(source_url)
+    if output_path.exists() and not force:
+        return {
+            "status": "exists",
+            "source_url": source_url,
+            "resolved_url": url,
+            "output": str(output_path),
+            "bytes": output_path.stat().st_size,
+        }
+    if dry_run:
+        return {
+            "status": "dry_run",
+            "source_url": source_url,
+            "resolved_url": url,
+            "output": str(output_path),
+        }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with requests.get(url, timeout=120, stream=True) as response:
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "")
+        if "pdf" not in content_type.lower() and not url.lower().split("?", 1)[0].endswith(".pdf"):
+            fail(
+                f"URL did not return a PDF content type: {content_type or 'unknown'}",
+                "for Hugging Face files use the /resolve/main/... URL or pass the original /blob/main/... URL to pdf-import",
+            )
+        with output_path.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    handle.write(chunk)
+    return {
+        "status": "wrote",
+        "source_url": source_url,
+        "resolved_url": url,
+        "output": str(output_path),
+        "bytes": output_path.stat().st_size,
+    }
+
+
+def load_fitz():
+    try:
+        import fitz  # type: ignore[import-not-found]
+    except ModuleNotFoundError:
+        fail(
+            "pdf-import requires PyMuPDF, but it is not installed",
+            "install it explicitly when you are ready: uv add pymupdf",
+            code=1,
+        )
+    return fitz
+
+
+def text_blocks_from_page(page: Any) -> list[str]:
+    data = page.get_text("dict")
+    blocks: list[str] = []
+    for block in data.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        lines: list[str] = []
+        for line in block.get("lines", []):
+            line_text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
+            if line_text:
+                lines.append(line_text)
+        text = " ".join(lines).strip()
+        if text:
+            blocks.append(text)
+    return blocks
+
+
+def pdf_to_source_html(
+    pdf_path: Path,
+    html_path: Path,
+    assets_dir: Path,
+    paper_id: str,
+    title: str,
+    image_dpi: int,
+    max_pages: int,
+    dry_run: bool,
+) -> dict[str, Any]:
+    if dry_run:
+        return {
+            "status": "dry_run",
+            "pdf": str(pdf_path),
+            "output": str(html_path),
+            "assets_dir": str(assets_dir),
+            "image_dpi": image_dpi,
+            "max_pages": max_pages,
+        }
+    fitz = load_fitz()
+    if not pdf_path.exists():
+        fail(f"PDF not found: {pdf_path}")
+
+    html_path.parent.mkdir(parents=True, exist_ok=True)
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    doc = fitz.open(pdf_path)
+    page_count = len(doc)
+    selected_pages = min(page_count, max_pages) if max_pages > 0 else page_count
+    zoom = image_dpi / 72
+    matrix = fitz.Matrix(zoom, zoom)
+    page_sections: list[str] = []
+    rendered_images = 0
+    text_blocks = 0
+
+    for page_index in range(selected_pages):
+        page = doc[page_index]
+        image_name = f"page-{page_index + 1:04d}.png"
+        image_path = assets_dir / image_name
+        pix = page.get_pixmap(matrix=matrix, alpha=False)
+        pix.save(image_path)
+        rendered_images += 1
+        paragraphs = text_blocks_from_page(page)
+        text_blocks += len(paragraphs)
+        image_src = f"../inputs/assets/{paper_id}/{image_name}"
+        paragraph_html = "\n".join(
+            f'<div class="ltx_para" id="p{page_index + 1}-{idx + 1}"><p class="ltx_p">{html.escape(text)}</p></div>'
+            for idx, text in enumerate(paragraphs)
+        )
+        page_sections.append(
+            f"""
+<section class="ltx_section codex_pdf_page" id="page-{page_index + 1}">
+  <h2 class="ltx_title ltx_title_section">Page {page_index + 1}</h2>
+  <figure class="ltx_figure codex_pdf_page_image">
+    <img class="ltx_graphics" src="{html.escape(image_src)}" alt="PDF page {page_index + 1}">
+  </figure>
+  {paragraph_html}
+</section>
+""".strip()
+        )
+
+    document_title = html.escape(title or paper_id)
+    page_sections_html = "\n".join(page_sections)
+    source_html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{document_title}</title>
+</head>
+<body>
+<article class="ltx_document codex_pdf_document">
+  <h1 class="ltx_title ltx_title_document">{document_title}</h1>
+  {page_sections_html}
+</article>
+</body>
+</html>
+"""
+    html_path.write_text(source_html, encoding="utf-8")
+    return {
+        "status": "wrote",
+        "pdf": str(pdf_path),
+        "output": str(html_path),
+        "assets_dir": str(assets_dir),
+        "pages": selected_pages,
+        "total_pages": page_count,
+        "images": rendered_images,
+        "text_blocks": text_blocks,
+    }
+
+
 def command_doctor(args: argparse.Namespace) -> None:
     env_path = Path(args.env_file)
     load_env_file(env_path)
@@ -156,6 +319,38 @@ def command_fetch(args: argparse.Namespace) -> None:
     output = Path(args.output) if args.output else Path("inputs") / f"{args.paper_id}.source.html"
     result = fetch_source(args.source_url, output, args.force, args.dry_run)
     emit(args, {"ok": True, "result": result}, f"{result['status']} {result['output']}")
+
+
+def command_pdf_import(args: argparse.Namespace) -> None:
+    paper_id = args.paper_id
+    pdf_path = Path(args.pdf) if args.pdf else Path("inputs/pdfs") / f"{paper_id}.pdf"
+    html_path = Path(args.output) if args.output else Path("inputs") / f"{paper_id}.source.html"
+    assets_dir = Path(args.assets_dir) if args.assets_dir else Path("inputs/assets") / paper_id
+    fetch_result = None
+    if args.pdf_url:
+        fetch_result = download_binary(args.pdf_url, pdf_path, args.force, args.dry_run)
+    title = args.title or paper_id
+    import_result = pdf_to_source_html(
+        pdf_path=pdf_path,
+        html_path=html_path,
+        assets_dir=assets_dir,
+        paper_id=paper_id,
+        title=title,
+        image_dpi=args.image_dpi,
+        max_pages=args.max_pages,
+        dry_run=args.dry_run,
+    )
+    payload = {
+        "ok": True,
+        "dry_run": args.dry_run,
+        "fetch": fetch_result,
+        "result": import_result,
+        "next": {
+            "dry_run_translate": f"./paper-translator translate --paper-id {paper_id} --dry-run",
+            "translate": f"./paper-translator translate --paper-id {paper_id}",
+        },
+    }
+    emit(args, payload, f"{import_result['status']} {html_path}")
 
 
 def command_translate(args: argparse.Namespace) -> None:
@@ -341,6 +536,28 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--force", action="store_true", help="overwrite existing input HTML")
     fetch.add_argument("--dry-run", action="store_true", help="show what would be downloaded without writing files")
     fetch.set_defaults(func=command_fetch)
+
+    pdf_import = subparsers.add_parser(
+        "pdf-import",
+        help="convert a PDF into image-backed source HTML",
+        description="Download or read a PDF, render page images, extract text blocks, and write inputs/<paper-id>.source.html.",
+        epilog=(
+            "example: scripts/paper_translator.py pdf-import --paper-id deepseek-v4 "
+            "--pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/resolve/main/DeepSeek_V4.pdf"
+        ),
+    )
+    add_common_flags(pdf_import)
+    pdf_import.add_argument("--paper-id", required=True)
+    pdf_import.add_argument("--pdf-url", default="", help="remote PDF URL; Hugging Face /blob/... URLs are normalized to /resolve/...")
+    pdf_import.add_argument("--pdf", default="", help="local PDF path; defaults to inputs/pdfs/<paper-id>.pdf")
+    pdf_import.add_argument("--output", default="", help="source HTML path; defaults to inputs/<paper-id>.source.html")
+    pdf_import.add_argument("--assets-dir", default="", help="page image directory; defaults to inputs/assets/<paper-id>")
+    pdf_import.add_argument("--title", default="", help="document title for the generated source HTML")
+    pdf_import.add_argument("--image-dpi", type=int, default=144)
+    pdf_import.add_argument("--max-pages", type=int, default=0, help="limit imported pages; 0 means all pages")
+    pdf_import.add_argument("--force", action="store_true", help="overwrite existing downloaded PDF")
+    pdf_import.add_argument("--dry-run", action="store_true")
+    pdf_import.set_defaults(func=command_pdf_import)
 
     translate = subparsers.add_parser(
         "translate",

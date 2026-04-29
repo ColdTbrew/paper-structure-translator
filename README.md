@@ -19,6 +19,7 @@ The bilingual output includes an `원본 보기` mode with English on the left a
 ## Features
 
 - Uses ar5iv HTML instead of PDF parsing.
+- Converts PDF-only papers into image-backed source HTML with `pdf-import`.
 - Masks HTML tags before calling the model, then restores the exact tags after translation.
 - Sends only translatable text blocks to the model.
 - Keeps `figure.ltx_table` table HTML unchanged to save tokens and avoid breaking tables.
@@ -110,6 +111,41 @@ Pass a new ar5iv URL directly to the CLI. It will derive the default input, outp
 ```
 
 Remove `--dry-run` when the block count looks right.
+
+## PDF-Only Papers
+
+If a paper has no ar5iv HTML and only ships as a PDF, import the PDF into source HTML first. PDF import requires PyMuPDF.
+
+```bash
+uv add pymupdf
+```
+
+Hugging Face `/blob/...` PDF URLs are normalized to the raw `/resolve/...` PDF URL automatically.
+
+```bash
+./paper-translator pdf-import \
+  --paper-id deepseek-v4 \
+  --pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf \
+  --title "DeepSeek V4" \
+  --json
+```
+
+This writes:
+
+```text
+inputs/pdfs/deepseek-v4.pdf
+inputs/assets/deepseek-v4/page-0001.png
+inputs/deepseek-v4.source.html
+```
+
+Then use the normal translation command:
+
+```bash
+./paper-translator translate --paper-id deepseek-v4 --dry-run
+./paper-translator translate --paper-id deepseek-v4
+```
+
+The PDF path is less structurally rich than ar5iv HTML. It preserves original page images for figures, equations, and tables, while translated text comes from extracted PDF text blocks.
 
 ## Re-apply Viewer Style or Restore Tables
 

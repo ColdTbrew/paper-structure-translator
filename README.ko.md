@@ -19,6 +19,7 @@ ar5iv HTML을 입력으로 받아, 깔끔한 한국어 논문 리더 HTML을 만
 ## 주요 기능
 
 - PDF 파싱 대신 ar5iv HTML을 사용합니다.
+- PDF만 있는 논문은 `pdf-import`로 페이지 이미지와 텍스트 블록을 가진 source HTML로 먼저 변환할 수 있습니다.
 - 모델 호출 전에 HTML 태그를 마스킹하고, 번역 후 같은 태그를 복원합니다.
 - 번역 가능한 텍스트 블록만 모델에 보냅니다.
 - `figure.ltx_table` 표 HTML은 모델에 보내지 않고 원본 그대로 유지해 토큰을 절약하고 표 깨짐을 줄입니다.
@@ -110,6 +111,41 @@ outputs/mmdocrag.ko-en.paper.html
 ```
 
 블록 수가 괜찮아 보이면 `--dry-run`을 제거하고 실행합니다.
+
+## PDF만 있는 논문
+
+ar5iv HTML이 없고 PDF만 있는 문서는 먼저 PDF를 source HTML로 가져옵니다. PDF 가져오기는 PyMuPDF가 필요합니다.
+
+```bash
+uv add pymupdf
+```
+
+Hugging Face의 `/blob/...` PDF URL은 자동으로 `/resolve/...` 원본 PDF URL로 정규화됩니다.
+
+```bash
+./paper-translator pdf-import \
+  --paper-id deepseek-v4 \
+  --pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf \
+  --title "DeepSeek V4" \
+  --json
+```
+
+생성되는 파일은 다음과 같습니다.
+
+```text
+inputs/pdfs/deepseek-v4.pdf
+inputs/assets/deepseek-v4/page-0001.png
+inputs/deepseek-v4.source.html
+```
+
+그다음 기존 번역 명령을 그대로 사용합니다.
+
+```bash
+./paper-translator translate --paper-id deepseek-v4 --dry-run
+./paper-translator translate --paper-id deepseek-v4
+```
+
+PDF 경로는 ar5iv HTML보다 구조 복원력이 낮습니다. 대신 원본 페이지 이미지를 함께 보존하므로 그림, 수식, 표는 페이지 이미지에서 확인하고, 추출된 텍스트 블록을 번역하는 방식으로 읽을 수 있습니다.
 
 ## 리더 스타일 재적용 또는 표 복원
 
