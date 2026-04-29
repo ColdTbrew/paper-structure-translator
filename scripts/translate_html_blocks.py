@@ -138,6 +138,16 @@ body {
   margin-right: auto !important;
   transform: none !important;
 }
+.ltx_figure:has(.ltx_transformed_outer table),
+.ltx_figure_panel:has(.ltx_transformed_outer table),
+.ltx_minipage:has(.ltx_transformed_outer table) {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  text-align: center !important;
+}
 .ltx_transformed_outer:has(table) {
   display: block !important;
   width: 100% !important;
