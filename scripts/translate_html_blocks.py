@@ -634,8 +634,16 @@ def fix_file_viewer_links(soup: BeautifulSoup) -> None:
         value = tag.get(attr)
         if not isinstance(value, str):
             continue
+        if value.startswith(("http://", "https://", "data:", "#", "mailto:")):
+            continue
         if value.startswith("/html/") or value.startswith("/assets/"):
             tag[attr] = "https://ar5iv.labs.arxiv.org" + value
+            continue
+        if value.startswith("/static/"):
+            tag[attr] = "https://arxiv.org" + value
+            continue
+        if re.match(r"^\d{4}\.\d{4,5}v\d+/", value):
+            tag[attr] = "https://arxiv.org/html/" + value
 
 
 def build_bilingual_view(ko_soup: BeautifulSoup, source_soup: BeautifulSoup) -> BeautifulSoup:
