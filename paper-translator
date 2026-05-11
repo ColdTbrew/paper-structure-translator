@@ -2,4 +2,6 @@
 set -eu
 
 cd "$(dirname "$0")"
+: "${UV_CACHE_DIR:=.uv-cache}"
+export UV_CACHE_DIR
 exec uv run scripts/paper_translator.py "$@"

@@ -32,6 +32,9 @@ The pipeline should:
 - `scripts/paper_translator.py`: agent-aware CLI with `--json` and `--dry-run` support.
 - `scripts/translate_html_blocks.py`: masks HTML tags, translates text blocks, restores tags, and writes viewer HTML.
 - `scripts/apply_paper_viewer_style.py`: reapplies viewer CSS and restores source tables without calling the model.
+- `macos-app/`: native SwiftUI desktop wrapper for drag-and-drop PDFs and clipboard URL translation. It directly runs `scripts/paper_translator.py` through `.venv/bin/python`; it does not require `uv` at app runtime.
+- `scripts/bootstrap_python_env.sh`: creates `.venv` without `uv`; use `--with-pdf` when PDF import support is needed.
+- `scripts/build_macos_app.sh`: builds `dist/Paper Translator.app` for local desktop use.
 - `skills/paper-structure-translator/SKILL.md`: reusable skill instructions for agents.
 
 ## Setup
@@ -110,6 +113,15 @@ Run:
 
 ```bash
 uv run python -m py_compile scripts/*.py
+```
+
+For the macOS wrapper, run:
+
+```bash
+./scripts/bootstrap_python_env.sh
+swift build --package-path macos-app
+./scripts/build_macos_app.sh
+plutil -lint "dist/Paper Translator.app/Contents/Info.plist"
 ```
 
 For browser verification:

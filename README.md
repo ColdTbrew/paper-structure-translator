@@ -99,6 +99,43 @@ outputs/mmdocrag.ko-en.paper.html
 `*.ko.paper.html` is the Korean-only viewer.  
 `*.ko-en.paper.html` starts with a Korean-only view. Click `원본 보기` to switch to a two-column reader with English on the left and Korean on the right.
 
+## macOS App
+
+This repo also includes a small SwiftUI wrapper app for local desktop use. The app is native SwiftUI for the macOS interface, while the translation engine remains the existing Python pipeline for HTML parsing, caching, and model calls.
+
+The app runtime does not require `uv`: it runs `scripts/paper_translator.py` directly through `repo/.venv/bin/python`. If you want to prepare that environment without `uv`, run:
+
+```bash
+./scripts/bootstrap_python_env.sh
+```
+
+For drag-and-drop PDF import support, install the optional PDF dependency:
+
+```bash
+./scripts/bootstrap_python_env.sh --with-pdf
+```
+
+Build the app bundle:
+
+```bash
+./scripts/build_macos_app.sh
+```
+
+The bundle is written to:
+
+```text
+dist/Paper Translator.app
+```
+
+In the app you can:
+
+- Drag and drop a local PDF. The app runs `pdf-import`, `translate`, then `restyle`.
+- Copy an arXiv/ar5iv HTML URL, then click `클립보드 URL 번역`. The app runs `fetch`, `translate`, then `restyle`.
+- Watch the CLI progress log live.
+- Open the Korean-only or English/Korean parallel HTML output.
+
+The app auto-detects this repository when launched from the repo, and you can edit the repo path in the Settings panel. Leave API key and base URL fields empty to use `.env`; fill them only when you want a temporary app-level override.
+
 ## Translate Another Paper
 
 Pass a new ar5iv URL directly to the CLI. It will derive the default input, output, cache, and bilingual output paths from `--paper-id`.
@@ -161,6 +198,8 @@ If you already have translated HTML and only want to refresh the viewer CSS or r
 - `scripts/paper_translator.py`: agent-aware CLI for `doctor`, `fetch`, `translate`, `restyle`, and `serve`.
 - `scripts/translate_html_blocks.py`: masks tags, translates text blocks, restores tags, writes paper-viewer HTML.
 - `scripts/apply_paper_viewer_style.py`: reapplies viewer CSS, fixes ar5iv asset links, optionally restores original table HTML.
+- `scripts/bootstrap_python_env.sh`: creates `.venv` without `uv` and installs runtime Python dependencies.
+- `scripts/build_macos_app.sh`: builds the SwiftUI desktop wrapper into `dist/Paper Translator.app`.
 
 ## Notes
 

@@ -11,3 +11,6 @@ __pycache__/
 *.png
 !docs/
 !docs/*.png
+dist/
+macos-app/.build/
+macos-app/.swiftpm/

@@ -99,6 +99,43 @@ outputs/mmdocrag.ko-en.paper.html
 `*.ko.paper.html`은 한국어 단독 리더입니다.  
 `*.ko-en.paper.html`은 처음에는 한국어 단독 보기로 열립니다. `원본 보기`를 클릭하면 왼쪽 영어, 오른쪽 한국어의 2열 병행 리더로 전환됩니다.
 
+## macOS 앱
+
+이 레포에는 로컬 데스크톱에서 쓰기 위한 작은 SwiftUI 래퍼 앱도 포함되어 있습니다. macOS 인터페이스는 SwiftUI 네이티브로 작성했고, HTML 파싱/캐시/모델 호출/표 복원 같은 번역 엔진은 기존 Python 파이프라인을 그대로 사용합니다.
+
+앱 런타임은 `uv`를 요구하지 않습니다. 앱은 `./paper-translator` 래퍼를 거치지 않고 `repo/.venv/bin/python`으로 `scripts/paper_translator.py`를 직접 실행합니다. `uv` 없이 `.venv`를 준비하려면 다음을 실행합니다.
+
+```bash
+./scripts/bootstrap_python_env.sh
+```
+
+PDF 드래그 앤 드롭 가져오기를 쓰려면 선택 의존성도 설치합니다.
+
+```bash
+./scripts/bootstrap_python_env.sh --with-pdf
+```
+
+앱 번들을 빌드합니다.
+
+```bash
+./scripts/build_macos_app.sh
+```
+
+번들은 다음 위치에 생성됩니다.
+
+```text
+dist/Paper Translator.app
+```
+
+앱에서 할 수 있는 일:
+
+- 로컬 PDF를 드래그 앤 드롭하면 `pdf-import`, `translate`, `restyle` 순서로 실행합니다.
+- arXiv/ar5iv HTML URL을 복사한 뒤 `클립보드 URL 번역`을 누르면 `fetch`, `translate`, `restyle` 순서로 실행합니다.
+- CLI 진행 로그를 앱 안에서 실시간으로 확인합니다.
+- 한국어 단독 HTML 또는 영어/한국어 병행 HTML을 바로 엽니다.
+
+앱은 레포에서 실행될 때 이 레포 경로를 자동 감지하며, 설정 패널에서 경로를 수정할 수 있습니다. API key와 base URL 입력칸은 비워두면 `.env`를 사용합니다. 앱에서 임시로 덮어쓸 때만 값을 넣으면 됩니다.
+
 ## 다른 논문 번역하기
 
 새 ar5iv URL을 CLI에 직접 넘깁니다. `--paper-id`를 기준으로 입력, 출력, 캐시, 병행 출력 경로가 자동으로 정해집니다.
@@ -161,6 +198,8 @@ PDF 경로는 ar5iv HTML보다 구조 복원력이 낮습니다. 대신 원본 �
 - `scripts/paper_translator.py`: `doctor`, `fetch`, `translate`, `restyle`, `serve`를 제공하는 에이전트 친화 CLI입니다.
 - `scripts/translate_html_blocks.py`: 태그를 마스킹하고, 텍스트 블록을 번역하고, 태그를 복원한 뒤 논문 리더 HTML을 작성합니다.
 - `scripts/apply_paper_viewer_style.py`: 리더 CSS를 다시 적용하고, ar5iv asset 링크를 고치며, 선택적으로 원본 표 HTML을 복원합니다.
+- `scripts/bootstrap_python_env.sh`: `uv` 없이 `.venv`를 만들고 Python 런타임 의존성을 설치합니다.
+- `scripts/build_macos_app.sh`: SwiftUI 데스크톱 래퍼를 `dist/Paper Translator.app`으로 빌드합니다.
 
 ## 참고
 
