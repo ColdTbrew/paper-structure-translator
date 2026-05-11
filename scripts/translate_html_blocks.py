@@ -363,9 +363,17 @@ document.addEventListener("DOMContentLoaded", function () {
   const panels = Array.from(document.querySelectorAll(".codex_panel"));
   const syncButton = document.querySelector(".codex_sync_button");
   const columns = Array.from(document.querySelectorAll(".codex_parallel_column"));
+  const tabs = document.querySelector(".codex_tabs");
   let syncEnabled = true;
   let isSyncing = false;
+  let lastScrolledColumn = null;
   const scrollPositions = new Map();
+  function cssEscape(value) {
+    if (window.CSS && typeof window.CSS.escape === "function") {
+      return window.CSS.escape(value);
+    }
+    return String(value).replace(/["\\\\]/g, "\\\\$&");
+  }
   function captureScrollPositions() {
     columns.forEach((column) => {
       scrollPositions.set(column, column.scrollTop);
@@ -394,6 +402,82 @@ document.addEventListener("DOMContentLoaded", function () {
       isSyncing = false;
     }, 0);
   }
+  function viewportTop() {
+    return tabs ? tabs.getBoundingClientRect().bottom : 0;
+  }
+  function snapshotFromContainer(container, scrollElement) {
+    if (!container) return null;
+    const top = scrollElement ? scrollElement.getBoundingClientRect().top + 46 : viewportTop();
+    const candidates = Array.from(container.querySelectorAll("[id]")).filter(
+      (element) => !String(element.id).startsWith("codex-")
+    );
+    let best = null;
+    for (const element of candidates) {
+      const rect = element.getBoundingClientRect();
+      if (rect.bottom < top) continue;
+      const distance = Math.abs(rect.top - top);
+      if (!best || distance < best.distance) {
+        best = { id: element.id, offset: rect.top - top, distance };
+      }
+      if (rect.top >= top) break;
+    }
+    const maxScroll = scrollElement
+      ? scrollElement.scrollHeight - scrollElement.clientHeight
+      : document.documentElement.scrollHeight - window.innerHeight;
+    const currentScroll = scrollElement ? scrollElement.scrollTop : window.scrollY;
+    return {
+      id: best ? best.id : "",
+      offset: best ? best.offset : 0,
+      ratio: maxScroll > 0 ? currentScroll / maxScroll : 0,
+    };
+  }
+  function captureViewSnapshot() {
+    const active = panels.find((panel) => !panel.hidden);
+    if (!active) return null;
+    if (active.id === "codex-panel-parallel") {
+      const column = lastScrolledColumn || columns[1] || columns[0];
+      return snapshotFromContainer(column, column);
+    }
+    return snapshotFromContainer(active, null);
+  }
+  function restoreWindowSnapshot(snapshot) {
+    if (!snapshot) return;
+    const escapedId = snapshot.id ? cssEscape(snapshot.id) : "";
+    const target = escapedId ? document.querySelector(`#codex-panel-ko #${escapedId}`) : null;
+    if (target) {
+      const nextY = window.scrollY + target.getBoundingClientRect().top - viewportTop() - snapshot.offset;
+      window.scrollTo(0, Math.max(0, nextY));
+      return;
+    }
+    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+    window.scrollTo(0, Math.max(0, maxScroll * snapshot.ratio));
+  }
+  function restoreColumnSnapshot(column, snapshot) {
+    if (!column || !snapshot) return;
+    const escapedId = snapshot.id ? cssEscape(snapshot.id) : "";
+    const target = escapedId ? column.querySelector(`#${escapedId}`) : null;
+    if (target) {
+      const columnTop = column.getBoundingClientRect().top + 46;
+      column.scrollTop = clampScrollTop(
+        column,
+        column.scrollTop + target.getBoundingClientRect().top - columnTop - snapshot.offset
+      );
+      return;
+    }
+    column.scrollTop = clampScrollTop(
+      column,
+      (column.scrollHeight - column.clientHeight) * snapshot.ratio
+    );
+  }
+  function restoreViewSnapshot(target, snapshot) {
+    if (!snapshot) return;
+    if (target === "codex-panel-parallel") {
+      columns.forEach((column) => restoreColumnSnapshot(column, snapshot));
+      captureScrollPositions();
+      return;
+    }
+    restoreWindowSnapshot(snapshot);
+  }
   function setSyncEnabled(enabled) {
     syncEnabled = enabled;
     if (!syncButton) return;
@@ -402,7 +486,8 @@ document.addEventListener("DOMContentLoaded", function () {
     syncButton.setAttribute("aria-pressed", enabled ? "true" : "false");
     captureScrollPositions();
   }
-  function activate(target) {
+  function activate(target, preservePosition = true) {
+    const snapshot = preservePosition ? captureViewSnapshot() : null;
     buttons.forEach((button) => {
       const selected = button.dataset.target === target;
       button.setAttribute("aria-selected", selected ? "true" : "false");
@@ -413,9 +498,8 @@ document.addEventListener("DOMContentLoaded", function () {
     if (syncButton) {
       syncButton.hidden = target !== "codex-panel-parallel";
     }
-    if (target === "codex-panel-parallel") {
-      window.scrollTo(0, 0);
-      window.setTimeout(captureScrollPositions, 0);
+    if (preservePosition) {
+      window.setTimeout(() => restoreViewSnapshot(target, snapshot), 0);
     }
   }
   buttons.forEach((button) => {
@@ -424,6 +508,7 @@ document.addEventListener("DOMContentLoaded", function () {
   columns.forEach((column) => {
     column.addEventListener("scroll", () => {
       if (isSyncing) return;
+      lastScrolledColumn = column;
       syncFrom(column);
     }, { passive: true });
   });
@@ -431,7 +516,7 @@ document.addEventListener("DOMContentLoaded", function () {
     syncButton.addEventListener("click", () => setSyncEnabled(!syncEnabled));
     setSyncEnabled(true);
   }
-  activate("codex-panel-ko");
+  activate("codex-panel-ko", false);
 });
 </script>
 """
