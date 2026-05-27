@@ -1,4 +1,5 @@
 import AppKit
+import Network
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -463,6 +464,7 @@ final class TranslatorModel: ObservableObject {
         let settings = runtimeSettings()
         startWorkflow(paperID: paperID, title: "URL 번역") { [weak self] in
             try await self?.runCommand(["fetch", "--paper-id", paperID, "--source-url", value, "--force", "--json"], settings: settings)
+            try Self.validateModelEndpoint(settings: settings)
             try await self?.runCommand(["translate", "--paper-id", paperID, "--json"], settings: settings)
             try await self?.runCommand(["restyle", "--paper-id", paperID, "--json"], settings: settings)
         }
@@ -508,6 +510,7 @@ final class TranslatorModel: ObservableObject {
         let settings = runtimeSettings()
         startWorkflow(paperID: paperID, title: "PDF 번역") { [weak self] in
             try await self?.runCommand(["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--json"], settings: settings)
+            try Self.validateModelEndpoint(settings: settings)
             try await self?.runCommand(["translate", "--paper-id", paperID, "--json"], settings: settings)
             try await self?.runCommand(["restyle", "--paper-id", paperID, "--json"], settings: settings)
         }
@@ -713,6 +716,72 @@ final class TranslatorModel: ObservableObject {
             return candidate
         }
         return nil
+    }
+
+    private static func validateModelEndpoint(settings: RuntimeSettings) throws {
+        let baseURL = effectiveBaseURL(settings: settings)
+        guard !baseURL.isEmpty else {
+            throw AppError.message("Base URL이 비어 있습니다. 설정에 6번 서버 주소를 입력하거나 .env에 OPENAI_BASE_URL을 넣어주세요.")
+        }
+        guard let url = URL(string: baseURL), let host = url.host else {
+            throw AppError.message("Base URL 형식이 올바르지 않습니다: \(baseURL)")
+        }
+        let port = UInt16(url.port ?? (url.scheme == "https" ? 443 : 80))
+        guard canReach(host: host, port: port, timeout: 2.0) else {
+            throw AppError.message("Base URL에 연결할 수 없습니다: \(baseURL)\n6번 서버를 쓰려면 설정 또는 .env의 OPENAI_BASE_URL을 http://121.126.210.6:8317/v1 로 맞춰주세요.")
+        }
+    }
+
+    private static func effectiveBaseURL(settings: RuntimeSettings) -> String {
+        if !settings.baseURLOverride.isEmpty {
+            return settings.baseURLOverride
+        }
+        return envValue(repoPath: settings.repoPath, key: "OPENAI_BASE_URL") ?? ""
+    }
+
+    private static func envValue(repoPath: String, key: String) -> String? {
+        let envURL = URL(fileURLWithPath: repoPath).appendingPathComponent(".env")
+        guard let contents = try? String(contentsOf: envURL, encoding: .utf8) else {
+            return nil
+        }
+        for rawLine in contents.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
+            let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2, parts[0].trimmingCharacters(in: .whitespacesAndNewlines) == key else {
+                continue
+            }
+            return String(parts[1])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        }
+        return nil
+    }
+
+    private static func canReach(host: String, port: UInt16, timeout: TimeInterval) -> Bool {
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+            return false
+        }
+        let semaphore = DispatchSemaphore(value: 0)
+        let queue = DispatchQueue(label: "paper-translator.endpoint-check")
+        let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
+        var isReady = false
+
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                isReady = true
+                semaphore.signal()
+            case .failed, .cancelled:
+                semaphore.signal()
+            default:
+                break
+            }
+        }
+        connection.start(queue: queue)
+        _ = semaphore.wait(timeout: .now() + timeout)
+        connection.cancel()
+        return isReady
     }
 }
 

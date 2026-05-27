@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup, Tag
@@ -322,7 +323,7 @@ body.has_bilingual_view .codex_parallel_column:first-child {
 }
 body.has_bilingual_view .codex_parallel_label {
   position: sticky;
-  top: 54px;
+  top: 0;
   z-index: 10;
   padding: 6px 12px;
   background: rgba(255,255,255,0.96);
@@ -330,6 +331,15 @@ body.has_bilingual_view .codex_parallel_label {
   font: 600 13px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
   color: #555;
   text-align: center;
+}
+body.has_bilingual_view .codex_alignment_spacer {
+  display: block !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 body.has_bilingual_view .codex_parallel .ltx_document {
   max-width: 760px !important;
@@ -367,7 +377,13 @@ document.addEventListener("DOMContentLoaded", function () {
   let syncEnabled = true;
   let isSyncing = false;
   let lastScrolledColumn = null;
+  let alignmentTimer = null;
   const scrollPositions = new Map();
+  const alignmentAnchorSelector = [
+    "section.ltx_section[id]",
+    "section.ltx_subsection[id]",
+    "section.ltx_subsubsection[id]"
+  ].join(",");
   function cssEscape(value) {
     if (window.CSS && typeof window.CSS.escape === "function") {
       return window.CSS.escape(value);
@@ -382,6 +398,110 @@ document.addEventListener("DOMContentLoaded", function () {
   function clampScrollTop(element, value) {
     const max = element.scrollHeight - element.clientHeight;
     return Math.max(0, Math.min(max, value));
+  }
+  function isParallelActive() {
+    const panel = document.getElementById("codex-panel-parallel");
+    return Boolean(panel && !panel.hidden && columns.length >= 2);
+  }
+  function removeAlignmentSpacers() {
+    document.querySelectorAll(".codex_alignment_spacer").forEach((spacer) => spacer.remove());
+  }
+  function collectAlignmentAnchors(column) {
+    const anchors = new Map();
+    const article = column ? column.querySelector("article.ltx_document") : null;
+    if (!article) return anchors;
+    Array.from(article.querySelectorAll(alignmentAnchorSelector)).forEach((element) => {
+      if (element.id && !String(element.id).startsWith("codex-")) {
+        const title = Array.from(element.children).find((child) =>
+          child.classList && child.classList.contains("ltx_title")
+        );
+        anchors.set(element.id, {
+          measure: title || element,
+          insertBefore: element
+        });
+      }
+    });
+    return anchors;
+  }
+  function scrollContentTop(element, column) {
+    return element.getBoundingClientRect().top + column.scrollTop - column.getBoundingClientRect().top;
+  }
+  function insertAlignmentSpacerBefore(element, height) {
+    if (!element || !element.parentNode || height < 2) return;
+    const spacer = document.createElement("div");
+    spacer.className = "codex_alignment_spacer";
+    spacer.setAttribute("aria-hidden", "true");
+    spacer.style.height = `${Math.ceil(height)}px`;
+    element.parentNode.insertBefore(spacer, element);
+  }
+  function alignParallelColumns() {
+    if (!isParallelActive()) return;
+    removeAlignmentSpacers();
+    const [leftColumn, rightColumn] = columns;
+    const leftAnchors = collectAlignmentAnchors(leftColumn);
+    const rightAnchors = collectAlignmentAnchors(rightColumn);
+    const ids = Array.from(leftAnchors.keys()).filter((id) => rightAnchors.has(id));
+    for (let pass = 0; pass < 3; pass += 1) {
+      let changed = false;
+      ids.forEach((id) => {
+        const left = leftAnchors.get(id);
+        const right = rightAnchors.get(id);
+        if (!left || !right) return;
+        const leftTop = scrollContentTop(left.measure, leftColumn);
+        const rightTop = scrollContentTop(right.measure, rightColumn);
+        const delta = Math.round(rightTop - leftTop);
+        if (Math.abs(delta) < 2) return;
+        changed = true;
+        if (delta > 0) {
+          insertAlignmentSpacerBefore(left.insertBefore, delta);
+        } else {
+          insertAlignmentSpacerBefore(right.insertBefore, -delta);
+        }
+      });
+      if (!changed) break;
+    }
+    captureScrollPositions();
+  }
+  function restoreParallelSnapshot(snapshot) {
+    if (!snapshot) return;
+    const escapedId = snapshot.id ? cssEscape(snapshot.id) : "";
+    const targetPairs = escapedId
+      ? columns
+          .map((column) => ({ column, target: column.querySelector(`#${escapedId}`) }))
+          .filter((item) => item.target)
+      : [];
+    if (targetPairs.length) {
+      const referenceTop = Math.max(
+        ...targetPairs.map((item) => scrollContentTop(item.target, item.column))
+      );
+      const nextTop = referenceTop - 46 - snapshot.offset;
+      columns.forEach((column) => {
+        column.scrollTop = clampScrollTop(column, nextTop);
+      });
+      captureScrollPositions();
+      return;
+    }
+    const maxScroll = Math.min(
+      ...columns.map((column) => Math.max(0, column.scrollHeight - column.clientHeight))
+    );
+    const nextTop = Math.max(0, maxScroll * snapshot.ratio);
+    columns.forEach((column) => {
+      column.scrollTop = clampScrollTop(column, nextTop);
+    });
+    captureScrollPositions();
+  }
+  function scheduleParallelAlignment(preservePosition = true) {
+    if (alignmentTimer) {
+      window.clearTimeout(alignmentTimer);
+    }
+    const snapshot = preservePosition && isParallelActive() ? captureViewSnapshot() : null;
+    alignmentTimer = window.setTimeout(() => {
+      alignmentTimer = null;
+      alignParallelColumns();
+      if (snapshot) {
+        restoreViewSnapshot("codex-panel-parallel", snapshot);
+      }
+    }, 80);
   }
   function syncFrom(source) {
     if (!source || !syncEnabled || isSyncing || columns.length < 2) return;
@@ -472,8 +592,7 @@ document.addEventListener("DOMContentLoaded", function () {
   function restoreViewSnapshot(target, snapshot) {
     if (!snapshot) return;
     if (target === "codex-panel-parallel") {
-      columns.forEach((column) => restoreColumnSnapshot(column, snapshot));
-      captureScrollPositions();
+      restoreParallelSnapshot(snapshot);
       return;
     }
     restoreWindowSnapshot(snapshot);
@@ -499,7 +618,14 @@ document.addEventListener("DOMContentLoaded", function () {
       syncButton.hidden = target !== "codex-panel-parallel";
     }
     if (preservePosition) {
-      window.setTimeout(() => restoreViewSnapshot(target, snapshot), 0);
+      window.setTimeout(() => {
+        if (target === "codex-panel-parallel") {
+          alignParallelColumns();
+        }
+        restoreViewSnapshot(target, snapshot);
+      }, 0);
+    } else if (target === "codex-panel-parallel") {
+      window.setTimeout(() => alignParallelColumns(), 0);
     }
   }
   buttons.forEach((button) => {
@@ -516,6 +642,15 @@ document.addEventListener("DOMContentLoaded", function () {
     syncButton.addEventListener("click", () => setSyncEnabled(!syncEnabled));
     setSyncEnabled(true);
   }
+  columns.forEach((column) => {
+    column.querySelectorAll("img").forEach((image) => {
+      if (!image.complete) {
+        image.addEventListener("load", () => scheduleParallelAlignment(true), { once: true });
+        image.addEventListener("error", () => scheduleParallelAlignment(true), { once: true });
+      }
+    });
+  });
+  window.addEventListener("resize", () => scheduleParallelAlignment(true));
   activate("codex-panel-ko", false);
 });
 </script>
@@ -713,19 +848,52 @@ def inject_bilingual_assets(soup: BeautifulSoup) -> None:
         body.append(script_tag)
 
 
+def document_origin(soup: BeautifulSoup) -> str:
+    for tag in soup.find_all(["link", "script"]):
+        value = tag.get("href") if tag.name == "link" else tag.get("src")
+        if isinstance(value, str) and value.startswith("/static/browse/"):
+            return "https://arxiv.org"
+    for tag in soup.find_all("a", href=True, limit=40):
+        href = tag.get("href")
+        if isinstance(href, str) and href.startswith("https://arxiv.org/html/"):
+            return "https://arxiv.org"
+    return "https://ar5iv.labs.arxiv.org"
+
+
+def document_base_url(soup: BeautifulSoup) -> str:
+    base = soup.find("base")
+    href = base.get("href") if base else ""
+    if not isinstance(href, str) or not href:
+        return ""
+    if href.startswith(("http://", "https://")):
+        return href
+    if href.startswith(("/html/", "/assets/", "/static/")):
+        absolute = document_origin(soup) + href
+        base["href"] = absolute
+        return absolute
+    return ""
+
+
 def fix_file_viewer_links(soup: BeautifulSoup) -> None:
-    for tag in soup.find_all(["img", "link", "script", "a"]):
+    base_url = document_base_url(soup)
+    for tag in soup.find_all(["img", "link", "script", "a", "source"]):
         attr = "href" if tag.name in {"a", "link"} else "src"
         value = tag.get(attr)
         if not isinstance(value, str):
             continue
-        if value.startswith(("http://", "https://", "data:", "#", "mailto:")):
+        if value.startswith(("http://", "https://", "data:", "#", "mailto:", "javascript:")):
+            continue
+        if value.startswith("//"):
+            tag[attr] = "https:" + value
             continue
         if value.startswith("/html/") or value.startswith("/assets/"):
-            tag[attr] = "https://ar5iv.labs.arxiv.org" + value
+            tag[attr] = document_origin(soup) + value
             continue
         if value.startswith("/static/"):
             tag[attr] = "https://arxiv.org" + value
+            continue
+        if base_url:
+            tag[attr] = urljoin(base_url, value)
             continue
         if re.match(r"^\d{4}\.\d{4,5}v\d+/", value):
             tag[attr] = "https://arxiv.org/html/" + value
