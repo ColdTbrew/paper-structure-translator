@@ -432,6 +432,8 @@ final class TranslatorModel: ObservableObject {
     @Published var logText = ""
     @Published var statusText = "대기"
     @Published var lastPaperID = ""
+    @Published var lastKoreanOutput = ""
+    @Published var lastBilingualOutput = ""
     @Published var isRunning = false
 
     private var currentProcess: Process?
@@ -532,10 +534,16 @@ final class TranslatorModel: ObservableObject {
 
     func openOutput(kind: OutputKind) {
         guard !lastPaperID.isEmpty else { return }
-        let suffix = kind == .korean ? ".ko.paper.html" : ".ko-en.paper.html"
-        let url = URL(fileURLWithPath: repoPath)
-            .appendingPathComponent("outputs")
-            .appendingPathComponent("\(lastPaperID)\(suffix)")
+        let rememberedPath = kind == .korean ? lastKoreanOutput : lastBilingualOutput
+        let url: URL
+        if !rememberedPath.isEmpty {
+            url = URL(fileURLWithPath: repoPath).appendingPathComponent(rememberedPath)
+        } else {
+            let suffix = kind == .korean ? ".ko.paper.html" : ".ko-en.paper.html"
+            url = URL(fileURLWithPath: repoPath)
+                .appendingPathComponent("outputs")
+                .appendingPathComponent("\(lastPaperID)\(suffix)")
+        }
         NSWorkspace.shared.open(url)
     }
 
@@ -556,6 +564,8 @@ final class TranslatorModel: ObservableObject {
         guard !isRunning else { return }
         logText = ""
         lastPaperID = paperID
+        lastKoreanOutput = ""
+        lastBilingualOutput = ""
         setRunning(true, status: "\(title) 실행 중")
         appendLog("paper_id=\(paperID.isEmpty ? "-" : paperID)")
         Task {
@@ -605,9 +615,11 @@ final class TranslatorModel: ObservableObject {
                 let pipe = Pipe()
                 process.standardOutput = pipe
                 process.standardError = pipe
+                var commandOutput = ""
                 pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
                     let data = handle.availableData
                     guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+                    commandOutput += text
                     DispatchQueue.main.async {
                         self?.appendLog(text.trimmingCharacters(in: .newlines))
                     }
@@ -629,6 +641,9 @@ final class TranslatorModel: ObservableObject {
                         }
                     }
                     if process.terminationStatus == 0 {
+                        DispatchQueue.main.async {
+                            self.captureOutputPaths(from: commandOutput)
+                        }
                         continuation.resume()
                     } else {
                         continuation.resume(throwing: AppError.message("command exited with status \(process.terminationStatus)"))
@@ -638,6 +653,15 @@ final class TranslatorModel: ObservableObject {
                     continuation.resume(throwing: error)
                 }
             }
+        }
+    }
+
+    private func captureOutputPaths(from text: String) {
+        if let output = Self.lastRegexMatch(pattern: #""output"\s*:\s*"([^"]+\.ko\.paper\.html)""#, in: text) {
+            lastKoreanOutput = output
+        }
+        if let bilingual = Self.lastRegexMatch(pattern: #""bilingual_output"\s*:\s*"([^"]+\.ko-en\.paper\.html)""#, in: text) {
+            lastBilingualOutput = bilingual
         }
     }
 
@@ -681,6 +705,19 @@ final class TranslatorModel: ObservableObject {
         let collapsed = String(mapped).replacingOccurrences(of: #"-+"#, with: "-", options: .regularExpression)
         let trimmed = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         return trimmed.isEmpty ? "paper" : trimmed
+    }
+
+    private static func lastRegexMatch(pattern: String, in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return nil
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.matches(in: text, range: range).last.flatMap { match in
+            guard match.numberOfRanges > 1, let captureRange = Range(match.range(at: 1), in: text) else {
+                return nil
+            }
+            return String(text[captureRange])
+        }
     }
 
     private static func detectRepoPath() -> String? {

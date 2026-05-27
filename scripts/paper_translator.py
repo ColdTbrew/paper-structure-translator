@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from bs4 import BeautifulSoup
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT_DIR = SCRIPT_DIR.parent
@@ -58,6 +59,44 @@ def slug_from_input(path: Path) -> str:
     return path.stem
 
 
+def safe_filename_stem(text: str, fallback: str, max_length: int = 140) -> str:
+    normalized = html.unescape(" ".join(text.split())).strip().lower()
+    mapped = [char if char.isalnum() else "-" for char in normalized]
+    collapsed = re.sub(r"-+", "-", "".join(mapped)).strip("-")
+    if not collapsed:
+        collapsed = fallback
+    return collapsed[:max_length].rstrip("-") or fallback
+
+
+def title_from_html(path: Path) -> str:
+    if not path.exists():
+        return ""
+    soup = BeautifulSoup(path.read_text(encoding="utf-8", errors="replace"), "lxml")
+    for selector in ("title", "h1.ltx_title_document", ".ltx_title_document"):
+        element = soup.select_one(selector)
+        if element:
+            title = element.get_text(" ", strip=True)
+            if title:
+                return title
+    return ""
+
+
+def output_stem_from_source(input_path: Path, paper_id: str) -> str:
+    title = title_from_html(input_path)
+    return safe_filename_stem(title, fallback=paper_id)
+
+
+def bilingual_path_for_output(output_path: Path) -> Path:
+    name = output_path.name
+    if name.endswith(".ko.paper.html"):
+        stem = name[: -len(".ko.paper.html")]
+    elif name.endswith(".html"):
+        stem = name[: -len(".html")]
+    else:
+        stem = output_path.stem
+    return output_path.with_name(f"{stem}.ko-en.paper.html")
+
+
 def resolve_paths(args: argparse.Namespace) -> dict[str, Path]:
     paper_id = args.paper_id
     input_path = Path(args.input) if args.input else None
@@ -70,11 +109,15 @@ def resolve_paths(args: argparse.Namespace) -> dict[str, Path]:
         )
 
     input_path = input_path or Path("inputs") / f"{paper_id}.source.html"
-    output_path = Path(args.output) if args.output else Path("outputs") / f"{paper_id}.ko.paper.html"
+    output_path = (
+        Path(args.output)
+        if args.output
+        else Path("outputs") / f"{output_stem_from_source(input_path, paper_id)}.ko.paper.html"
+    )
     bilingual_output = (
         Path(args.bilingual_output)
         if args.bilingual_output
-        else Path("outputs") / f"{paper_id}.ko-en.paper.html"
+        else bilingual_path_for_output(output_path)
     )
     cache_arg = getattr(args, "cache", "")
     progress_arg = getattr(args, "progress_log", "")
