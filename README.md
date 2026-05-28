@@ -103,6 +103,8 @@ outputs/mmdocrag.ko-en.paper.html
 
 This repo also includes a small SwiftUI wrapper app for local desktop use. The app is native SwiftUI for the macOS interface, while the translation engine runs the same `uv`-managed Python pipeline used by `./paper-translator`.
 
+![Paper Translator macOS app](docs/macos-app.png)
+
 Prepare the app runtime with:
 
 ```bash

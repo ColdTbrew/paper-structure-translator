@@ -1,6 +1,6 @@
 [project]
 name = "structure-preserving-paper-translator"
-version = "0.1.0"
+version = "0.0.1"
 description = "Chunked literal Korean translation pipeline for structure-preserving academic paper HTML."
 requires-python = ">=3.11"
 dependencies = [

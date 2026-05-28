@@ -103,6 +103,8 @@ outputs/mmdocrag.ko-en.paper.html
 
 이 레포에는 로컬 데스크톱에서 쓰기 위한 작은 SwiftUI 래퍼 앱도 포함되어 있습니다. macOS 인터페이스는 SwiftUI 네이티브로 작성했고, 번역 엔진은 `./paper-translator`와 같은 `uv` 관리 Python 파이프라인을 사용합니다.
 
+![Paper Translator macOS 앱](docs/macos-app.png)
+
 앱 런타임은 다음 명령으로 준비합니다.
 
 ```bash
