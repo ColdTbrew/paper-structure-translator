@@ -19,7 +19,7 @@ ar5iv HTML을 입력으로 받아, 깔끔한 한국어 논문 리더 HTML을 만
 ## 주요 기능
 
 - PDF 파싱 대신 ar5iv HTML을 사용합니다.
-- PDF만 있는 논문은 `pdf-import`로 페이지 이미지와 텍스트 블록을 가진 source HTML로 먼저 변환할 수 있습니다.
+- PDF만 있는 논문은 LiteParse 기반 `pdf-import`로 페이지 이미지와 텍스트 블록을 가진 source HTML로 먼저 변환할 수 있습니다.
 - 모델 호출 전에 HTML 태그를 마스킹하고, 번역 후 같은 태그를 복원합니다.
 - 번역 가능한 텍스트 블록만 모델에 보냅니다.
 - `figure.ltx_table` 표 HTML은 모델에 보내지 않고 원본 그대로 유지해 토큰을 절약하고 표 깨짐을 줄입니다.
@@ -101,18 +101,18 @@ outputs/mmdocrag.ko-en.paper.html
 
 ## macOS 앱
 
-이 레포에는 로컬 데스크톱에서 쓰기 위한 작은 SwiftUI 래퍼 앱도 포함되어 있습니다. macOS 인터페이스는 SwiftUI 네이티브로 작성했고, HTML 파싱/캐시/모델 호출/표 복원 같은 번역 엔진은 기존 Python 파이프라인을 그대로 사용합니다.
+이 레포에는 로컬 데스크톱에서 쓰기 위한 작은 SwiftUI 래퍼 앱도 포함되어 있습니다. macOS 인터페이스는 SwiftUI 네이티브로 작성했고, 번역 엔진은 `./paper-translator`와 같은 `uv` 관리 Python 파이프라인을 사용합니다.
 
-앱 런타임은 `uv`를 요구하지 않습니다. 앱은 `./paper-translator` 래퍼를 거치지 않고 `repo/.venv/bin/python`으로 `scripts/paper_translator.py`를 직접 실행합니다. `uv` 없이 `.venv`를 준비하려면 다음을 실행합니다.
+앱 런타임은 다음 명령으로 준비합니다.
+
+```bash
+uv sync
+```
+
+앱 밖의 스크립팅을 위해 독립 `.venv`가 필요할 때는 다음 명령도 계속 사용할 수 있습니다.
 
 ```bash
 ./scripts/bootstrap_python_env.sh
-```
-
-PDF 드래그 앤 드롭 가져오기를 쓰려면 선택 의존성도 설치합니다.
-
-```bash
-./scripts/bootstrap_python_env.sh --with-pdf
 ```
 
 앱 번들을 빌드합니다.
@@ -151,10 +151,16 @@ dist/Paper Translator.app
 
 ## PDF만 있는 논문
 
-ar5iv HTML이 없고 PDF만 있는 문서는 먼저 PDF를 source HTML로 가져옵니다. PDF 가져오기는 PyMuPDF가 필요합니다.
+ar5iv HTML이 없고 PDF만 있는 문서는 먼저 PDF를 source HTML로 가져옵니다. PDF 가져오기는 Python `liteparse` 패키지가 필요합니다.
 
 ```bash
-uv add pymupdf
+uv add liteparse
+```
+
+에이전트에서 LiteParse skill 지침도 쓰려면 다음 명령으로 추가할 수 있습니다.
+
+```bash
+npx skills add run-llama/llamaparse-agent-skills --skill liteparse
 ```
 
 Hugging Face의 `/blob/...` PDF URL은 자동으로 `/resolve/...` 원본 PDF URL로 정규화됩니다.
@@ -182,7 +188,7 @@ inputs/deepseek-v4.source.html
 ./paper-translator translate --paper-id deepseek-v4
 ```
 
-PDF 경로는 ar5iv HTML보다 구조 복원력이 낮습니다. 대신 원본 페이지 이미지를 함께 보존하므로 그림, 수식, 표는 페이지 이미지에서 확인하고, 추출된 텍스트 블록을 번역하는 방식으로 읽을 수 있습니다.
+PDF 경로는 ar5iv HTML보다 구조 복원력이 낮습니다. 대신 LiteParse로 원본 페이지 스크린샷을 함께 보존하므로 그림, 수식, 표는 페이지 이미지에서 확인하고, 추출된 텍스트 블록을 번역하는 방식으로 읽을 수 있습니다.
 
 ## 리더 스타일 재적용 또는 표 복원
 

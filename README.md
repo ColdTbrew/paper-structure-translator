@@ -19,7 +19,7 @@ The bilingual output includes an `원본 보기` mode with English on the left a
 ## Features
 
 - Uses ar5iv HTML instead of PDF parsing.
-- Converts PDF-only papers into image-backed source HTML with `pdf-import`.
+- Converts PDF-only papers into image-backed source HTML with LiteParse-backed `pdf-import`.
 - Masks HTML tags before calling the model, then restores the exact tags after translation.
 - Sends only translatable text blocks to the model.
 - Keeps `figure.ltx_table` table HTML unchanged to save tokens and avoid breaking tables.
@@ -101,18 +101,18 @@ outputs/mmdocrag.ko-en.paper.html
 
 ## macOS App
 
-This repo also includes a small SwiftUI wrapper app for local desktop use. The app is native SwiftUI for the macOS interface, while the translation engine remains the existing Python pipeline for HTML parsing, caching, and model calls.
+This repo also includes a small SwiftUI wrapper app for local desktop use. The app is native SwiftUI for the macOS interface, while the translation engine runs the same `uv`-managed Python pipeline used by `./paper-translator`.
 
-The app runtime does not require `uv`: it runs `scripts/paper_translator.py` directly through `repo/.venv/bin/python`. If you want to prepare that environment without `uv`, run:
+Prepare the app runtime with:
+
+```bash
+uv sync
+```
+
+If you specifically need a standalone `.venv` for scripting outside the app, you can still run:
 
 ```bash
 ./scripts/bootstrap_python_env.sh
-```
-
-For drag-and-drop PDF import support, install the optional PDF dependency:
-
-```bash
-./scripts/bootstrap_python_env.sh --with-pdf
 ```
 
 Build the app bundle:
@@ -151,10 +151,16 @@ Remove `--dry-run` when the block count looks right.
 
 ## PDF-Only Papers
 
-If a paper has no ar5iv HTML and only ships as a PDF, import the PDF into source HTML first. PDF import requires PyMuPDF.
+If a paper has no ar5iv HTML and only ships as a PDF, import the PDF into source HTML first. PDF import requires the Python `liteparse` package.
 
 ```bash
-uv add pymupdf
+uv add liteparse
+```
+
+Agents can also add the LiteParse skill instructions with:
+
+```bash
+npx skills add run-llama/llamaparse-agent-skills --skill liteparse
 ```
 
 Hugging Face `/blob/...` PDF URLs are normalized to the raw `/resolve/...` PDF URL automatically.
@@ -182,7 +188,7 @@ Then use the normal translation command:
 ./paper-translator translate --paper-id deepseek-v4
 ```
 
-The PDF path is less structurally rich than ar5iv HTML. It preserves original page images for figures, equations, and tables, while translated text comes from extracted PDF text blocks.
+The PDF path is less structurally rich than ar5iv HTML. It uses LiteParse to preserve original page screenshots for figures, equations, and tables, while translated text comes from extracted PDF text blocks.
 
 ## Re-apply Viewer Style or Restore Tables
 

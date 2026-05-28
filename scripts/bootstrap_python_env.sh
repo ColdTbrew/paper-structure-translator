@@ -3,12 +3,11 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-WITH_PDF=0
 
 for arg in "$@"; do
   case "$arg" in
     --with-pdf)
-      WITH_PDF=1
+      # Backward-compatible no-op: PDF support is installed by default.
       ;;
     *)
       echo "unknown option: $arg" >&2
@@ -25,10 +24,6 @@ if [ ! -x ".venv/bin/python" ]; then
 fi
 
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install beautifulsoup4 lxml requests
-
-if [ "$WITH_PDF" -eq 1 ]; then
-  .venv/bin/python -m pip install pymupdf
-fi
+.venv/bin/python -m pip install beautifulsoup4 liteparse lxml requests
 
 .venv/bin/python scripts/paper_translator.py doctor --json

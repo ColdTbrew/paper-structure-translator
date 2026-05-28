@@ -269,9 +269,9 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("Runtime", systemImage: "cpu")
             Label("SwiftUI native app", systemImage: "checkmark.circle")
-            Label(".venv Python direct", systemImage: "checkmark.circle")
-            Label("uv not used by app runtime", systemImage: "checkmark.circle")
-            Text("번역 엔진은 기존 Python 파이프라인을 직접 실행합니다. `.venv`가 없으면 `scripts/bootstrap_python_env.sh`로 준비하세요.")
+            Label("uv-managed Python runtime", systemImage: "checkmark.circle")
+            Label("same path as ./paper-translator", systemImage: "checkmark.circle")
+            Text("번역 엔진은 `uv run scripts/paper_translator.py`로 실행합니다. 처음 실행 전 `uv sync`로 의존성을 준비하세요.")
                 .font(AppTypography.korean(size: 12, weight: .regular))
                 .foregroundStyle(AppPalette.textSecondary)
         }
@@ -592,15 +592,15 @@ final class TranslatorModel: ObservableObject {
                     continuation.resume(throwing: AppError.message("scripts/paper_translator.py not found at \(script.path)"))
                     return
                 }
-                guard let python = Self.resolvePythonExecutable(repoPath: settings.repoPath) else {
-                    continuation.resume(throwing: AppError.message(".venv Python not found. Run scripts/bootstrap_python_env.sh first."))
+                guard let uv = Self.resolveUVExecutable() else {
+                    continuation.resume(throwing: AppError.message("uv not found. Install uv and run uv sync in the repository first."))
                     return
                 }
 
                 let process = Process()
                 process.currentDirectoryURL = URL(fileURLWithPath: settings.repoPath)
-                process.executableURL = python
-                process.arguments = [script.path] + arguments
+                process.executableURL = uv
+                process.arguments = ["run", "scripts/paper_translator.py"] + arguments
 
                 var env = ProcessInfo.processInfo.environment
                 env["UV_CACHE_DIR"] = ".uv-cache"
@@ -627,8 +627,8 @@ final class TranslatorModel: ObservableObject {
 
                 DispatchQueue.main.async {
                     self.currentProcess = process
-                    let displayPython = python.path.replacingOccurrences(of: settings.repoPath + "/", with: "")
-                    self.appendLog("$ \(displayPython) scripts/paper_translator.py \(arguments.joined(separator: " "))")
+                    let displayUV = uv.path.replacingOccurrences(of: settings.repoPath + "/", with: "")
+                    self.appendLog("$ \(displayUV) run scripts/paper_translator.py \(arguments.joined(separator: " "))")
                 }
 
                 do {
@@ -743,11 +743,17 @@ final class TranslatorModel: ObservableObject {
         return nil
     }
 
-    private static func resolvePythonExecutable(repoPath: String) -> URL? {
+    private static func resolveUVExecutable() -> URL? {
         let fileManager = FileManager.default
-        let candidates = [
-            URL(fileURLWithPath: repoPath).appendingPathComponent(".venv/bin/python"),
-            URL(fileURLWithPath: repoPath).appendingPathComponent(".venv/bin/python3")
+        var candidates = ProcessInfo.processInfo.environment["PATH", default: ""]
+            .split(separator: ":")
+            .map { URL(fileURLWithPath: String($0)).appendingPathComponent("uv") }
+        let home = fileManager.homeDirectoryForCurrentUser
+        candidates += [
+            home.appendingPathComponent(".local/bin/uv"),
+            home.appendingPathComponent(".cargo/bin/uv"),
+            URL(fileURLWithPath: "/opt/homebrew/bin/uv"),
+            URL(fileURLWithPath: "/usr/local/bin/uv")
         ]
         for candidate in candidates where fileManager.isExecutableFile(atPath: candidate.path) {
             return candidate

@@ -32,8 +32,8 @@ The pipeline should:
 - `scripts/paper_translator.py`: agent-aware CLI with `--json` and `--dry-run` support.
 - `scripts/translate_html_blocks.py`: masks HTML tags, translates text blocks, restores tags, and writes viewer HTML.
 - `scripts/apply_paper_viewer_style.py`: reapplies viewer CSS and restores source tables without calling the model.
-- `macos-app/`: native SwiftUI desktop wrapper for drag-and-drop PDFs and clipboard URL translation. It directly runs `scripts/paper_translator.py` through `.venv/bin/python`; it does not require `uv` at app runtime.
-- `scripts/bootstrap_python_env.sh`: creates `.venv` without `uv`; use `--with-pdf` when PDF import support is needed.
+- `macos-app/`: native SwiftUI desktop wrapper for drag-and-drop PDFs and clipboard URL translation. It runs `uv run scripts/paper_translator.py` so the app uses the same dependency graph as `./paper-translator`.
+- `scripts/bootstrap_python_env.sh`: optional helper that creates `.venv` and installs runtime Python dependencies for standalone scripting outside the app.
 - `scripts/build_macos_app.sh`: builds `dist/Paper Translator.app` for local desktop use.
 - `skills/paper-structure-translator/SKILL.md`: reusable skill instructions for agents.
 
@@ -72,7 +72,7 @@ Fetch source HTML with explicit flags:
   --json
 ```
 
-For PDF-only papers, first import the PDF. This requires PyMuPDF; if missing, tell the user to approve/install it with `uv add pymupdf`.
+For PDF-only papers, first import the PDF. This requires the Python `liteparse` package; if missing, install it with `uv add liteparse`. Agents may also add the LiteParse skill instructions with `npx skills add run-llama/llamaparse-agent-skills --skill liteparse`.
 
 ```bash
 ./paper-translator pdf-import \
@@ -82,7 +82,7 @@ For PDF-only papers, first import the PDF. This requires PyMuPDF; if missing, te
   --json
 ```
 
-The command normalizes Hugging Face `/blob/...` URLs to `/resolve/...`, stores the PDF under `inputs/pdfs/`, renders page PNGs under `inputs/assets/<paper-id>/`, and writes `inputs/<paper-id>.source.html`.
+The command normalizes Hugging Face `/blob/...` URLs to `/resolve/...`, stores the PDF under `inputs/pdfs/`, renders page PNGs under `inputs/assets/<paper-id>/` with LiteParse, and writes `inputs/<paper-id>.source.html`.
 
 Dry run before calling the model:
 

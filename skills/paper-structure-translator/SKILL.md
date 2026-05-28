@@ -72,9 +72,10 @@ Import PDF-only sources:
 Notes:
 
 - Prefer ar5iv HTML when available.
-- `pdf-import` requires PyMuPDF. If it is missing, ask for approval before installing and then run `uv add pymupdf`.
+- `pdf-import` requires the Python `liteparse` package. If it is missing, ask for approval before installing and then run `uv add liteparse`.
+- Agents may add the LiteParse skill instructions with `npx skills add run-llama/llamaparse-agent-skills --skill liteparse`.
 - Hugging Face `/blob/...` PDF URLs are normalized to `/resolve/...`.
-- PDF import preserves page images and extracts text blocks; it is less structure-rich than ar5iv HTML.
+- PDF import preserves page screenshots and extracts text blocks with LiteParse; it is less structure-rich than ar5iv HTML.
 
 One-paper dry run:
 

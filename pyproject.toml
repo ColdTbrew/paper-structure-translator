@@ -5,6 +5,7 @@ description = "Chunked literal Korean translation pipeline for structure-preserv
 requires-python = ">=3.11"
 dependencies = [
   "beautifulsoup4>=4.14.3",
+  "liteparse>=2.0.0",
   "lxml>=6.1.0",
   "requests>=2.33.1",
 ]

@@ -5,6 +5,7 @@ import argparse
 import contextlib
 import html
 import http.server
+import importlib.util
 import json
 import os
 import re
@@ -205,33 +206,49 @@ def download_binary(source_url: str, output_path: Path, force: bool, dry_run: bo
     }
 
 
-def load_fitz():
+def load_liteparse() -> Any:
     try:
-        import fitz  # type: ignore[import-not-found]
+        from liteparse import LiteParse  # type: ignore[import-not-found]
     except ModuleNotFoundError:
         fail(
-            "pdf-import requires PyMuPDF, but it is not installed",
-            "install it explicitly when you are ready: uv add pymupdf",
+            "pdf-import requires the Python liteparse package, but it is not installed",
+            "install it with: uv add liteparse",
             code=1,
         )
-    return fitz
+    return LiteParse
 
 
-def text_blocks_from_page(page: Any) -> list[str]:
-    data = page.get_text("dict")
-    blocks: list[str] = []
-    for block in data.get("blocks", []):
-        if block.get("type") != 0:
-            continue
-        lines: list[str] = []
-        for line in block.get("lines", []):
-            line_text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
-            if line_text:
-                lines.append(line_text)
-        text = " ".join(lines).strip()
-        if text:
-            blocks.append(text)
-    return blocks
+def split_text_paragraphs(text: str) -> list[str]:
+    paragraphs: list[str] = []
+    for chunk in re.split(r"\n\s*\n", text):
+        normalized = " ".join(line.strip() for line in chunk.splitlines() if line.strip()).strip()
+        if normalized:
+            paragraphs.append(normalized)
+    return paragraphs
+
+
+def text_blocks_from_liteparse_page(page: Any) -> list[str]:
+    text = getattr(page, "text", "")
+    if isinstance(text, str) and text.strip():
+        return split_text_paragraphs(text)
+    items = getattr(page, "text_items", [])
+    blocks = [getattr(item, "text", "").strip() for item in items]
+    return [block for block in blocks if block]
+
+
+def write_liteparse_screenshots(
+    shots: list[Any],
+    assets_dir: Path,
+    paper_id: str,
+) -> list[str]:
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    image_names: list[str] = []
+    for shot in sorted(shots, key=lambda item: getattr(item, "page_num", 0)):
+        page_num = getattr(shot, "page_num", len(image_names) + 1)
+        image_name = f"page-{page_num:04d}.png"
+        (assets_dir / image_name).write_bytes(getattr(shot, "image_bytes"))
+        image_names.append(image_name)
+    return [f"../inputs/assets/{paper_id}/{image_name}" for image_name in image_names]
 
 
 def pdf_to_source_html(
@@ -252,43 +269,56 @@ def pdf_to_source_html(
             "assets_dir": str(assets_dir),
             "image_dpi": image_dpi,
             "max_pages": max_pages,
+            "parser": "liteparse-python",
         }
-    fitz = load_fitz()
     if not pdf_path.exists():
         fail(f"PDF not found: {pdf_path}")
 
+    LiteParse = load_liteparse()
+    parser_kwargs: dict[str, Any] = {
+        "dpi": image_dpi,
+        "ocr_enabled": False,
+        "output_format": "json",
+        "quiet": True,
+    }
+    if max_pages > 0:
+        parser_kwargs["max_pages"] = max_pages
     html_path.parent.mkdir(parents=True, exist_ok=True)
     assets_dir.mkdir(parents=True, exist_ok=True)
-    doc = fitz.open(pdf_path)
-    page_count = len(doc)
-    selected_pages = min(page_count, max_pages) if max_pages > 0 else page_count
-    zoom = image_dpi / 72
-    matrix = fitz.Matrix(zoom, zoom)
     page_sections: list[str] = []
-    rendered_images = 0
     text_blocks = 0
 
+    parser = LiteParse(**parser_kwargs)
+    parsed = parser.parse(pdf_path)
+    page_numbers = list(range(1, max_pages + 1)) if max_pages > 0 else None
+    shots = parser.screenshot(pdf_path, page_numbers=page_numbers)
+    pages = getattr(parsed, "pages", [])
+    image_srcs = write_liteparse_screenshots(shots, assets_dir, paper_id)
+    selected_pages = max(len(pages), len(image_srcs))
+
     for page_index in range(selected_pages):
-        page = doc[page_index]
-        image_name = f"page-{page_index + 1:04d}.png"
-        image_path = assets_dir / image_name
-        pix = page.get_pixmap(matrix=matrix, alpha=False)
-        pix.save(image_path)
-        rendered_images += 1
-        paragraphs = text_blocks_from_page(page)
+        page = pages[page_index] if page_index < len(pages) else {}
+        paragraphs = text_blocks_from_liteparse_page(page)
         text_blocks += len(paragraphs)
-        image_src = f"../inputs/assets/{paper_id}/{image_name}"
+        image_src = image_srcs[page_index] if page_index < len(image_srcs) else ""
         paragraph_html = "\n".join(
             f'<div class="ltx_para" id="p{page_index + 1}-{idx + 1}"><p class="ltx_p">{html.escape(text)}</p></div>'
             for idx, text in enumerate(paragraphs)
+        )
+        figure_html = (
+            f"""
+  <figure class="ltx_figure codex_pdf_page_image">
+    <img class="ltx_graphics" src="{html.escape(image_src)}" alt="PDF page {page_index + 1}">
+  </figure>
+""".rstrip()
+            if image_src
+            else ""
         )
         page_sections.append(
             f"""
 <section class="ltx_section codex_pdf_page" id="page-{page_index + 1}">
   <h2 class="ltx_title ltx_title_section">Page {page_index + 1}</h2>
-  <figure class="ltx_figure codex_pdf_page_image">
-    <img class="ltx_graphics" src="{html.escape(image_src)}" alt="PDF page {page_index + 1}">
-  </figure>
+  {figure_html}
   {paragraph_html}
 </section>
 """.strip()
@@ -317,9 +347,10 @@ def pdf_to_source_html(
         "output": str(html_path),
         "assets_dir": str(assets_dir),
         "pages": selected_pages,
-        "total_pages": page_count,
-        "images": rendered_images,
+        "images": len(image_srcs),
         "text_blocks": text_blocks,
+        "parser": "liteparse-python",
+        "ocr_enabled": False,
     }
 
 
@@ -334,6 +365,7 @@ def command_doctor(args: argparse.Namespace) -> None:
         "env_file_exists": env_path.exists(),
         "openai_api_key_present": bool(api_key),
         "openai_base_url_present": bool(base_url),
+        "liteparse_python_present": importlib.util.find_spec("liteparse") is not None,
         "inputs_dir_exists": Path("inputs").exists(),
         "outputs_dir_exists": Path("outputs").exists(),
         "scripts_dir_exists": Path("scripts").exists(),
@@ -583,7 +615,7 @@ def build_parser() -> argparse.ArgumentParser:
     pdf_import = subparsers.add_parser(
         "pdf-import",
         help="convert a PDF into image-backed source HTML",
-        description="Download or read a PDF, render page images, extract text blocks, and write inputs/<paper-id>.source.html.",
+        description="Download or read a PDF, render page images with Python LiteParse, extract text blocks, and write inputs/<paper-id>.source.html.",
         epilog=(
             "example: scripts/paper_translator.py pdf-import --paper-id deepseek-v4 "
             "--pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/resolve/main/DeepSeek_V4.pdf"
