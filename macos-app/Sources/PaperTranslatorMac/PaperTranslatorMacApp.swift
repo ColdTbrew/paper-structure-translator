@@ -194,6 +194,22 @@ struct ContentView: View {
                     .disabled(model.isRunning)
                 }
                 GridRow {
+                    Text("Model")
+                    Picker("Model", selection: $model.selectedModel) {
+                        ForEach(TranslatorModel.modelOptions, id: \.id) { option in
+                            Text(option.displayName).tag(option.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .onChange(of: model.selectedModel) { _ in
+                        model.saveSettings()
+                    }
+                    Text("번역 요청에 사용합니다.")
+                        .font(AppTypography.korean(size: 12, weight: .regular))
+                        .foregroundStyle(AppPalette.textTertiary)
+                }
+                GridRow {
                     Text("API Key")
                     SecureField(".env를 쓰려면 비워두세요", text: $model.apiKeyOverride)
                         .textFieldStyle(GlassTextFieldStyle())
@@ -422,12 +438,28 @@ struct RuntimeSettings {
     let repoPath: String
     let baseURLOverride: String
     let apiKeyOverride: String
+    let model: String
+}
+
+struct ModelOption {
+    let displayName: String
+    let id: String
 }
 
 final class TranslatorModel: ObservableObject {
+    static let defaultModel = "gpt-5.4-mini"
+    static let modelOptions = [
+        ModelOption(displayName: "GPT-5.5", id: "gpt-5.5"),
+        ModelOption(displayName: "GPT-5.4", id: "gpt-5.4"),
+        ModelOption(displayName: "GPT-5.4-Mini", id: "gpt-5.4-mini"),
+        ModelOption(displayName: "GPT-5.3-Codex", id: "gpt-5.3-codex"),
+        ModelOption(displayName: "GPT-5.2", id: "gpt-5.2")
+    ]
+
     @Published var repoPath: String
     @Published var baseURLOverride: String
     @Published var apiKeyOverride = ""
+    @Published var selectedModel: String
     @Published var clipboardPreview = ""
     @Published var logText = ""
     @Published var statusText = "대기"
@@ -443,11 +475,14 @@ final class TranslatorModel: ObservableObject {
         let detectedRepo = Self.detectRepoPath() ?? FileManager.default.currentDirectoryPath
         repoPath = defaults.string(forKey: "repoPath") ?? detectedRepo
         baseURLOverride = defaults.string(forKey: "baseURLOverride") ?? ""
+        let storedModel = defaults.string(forKey: "selectedModel") ?? Self.defaultModel
+        selectedModel = Self.modelOptions.contains { $0.id == storedModel } ? storedModel : Self.defaultModel
     }
 
     func saveSettings() {
         defaults.set(repoPath, forKey: "repoPath")
         defaults.set(baseURLOverride, forKey: "baseURLOverride")
+        defaults.set(selectedModel, forKey: "selectedModel")
         appendLog("settings saved")
     }
 
@@ -467,7 +502,7 @@ final class TranslatorModel: ObservableObject {
         startWorkflow(paperID: paperID, title: "URL 번역") { [weak self] in
             try await self?.runCommand(["fetch", "--paper-id", paperID, "--source-url", value, "--force", "--json"], settings: settings)
             try Self.validateModelEndpoint(settings: settings)
-            try await self?.runCommand(["translate", "--paper-id", paperID, "--json"], settings: settings)
+            try await self?.runCommand(["translate", "--paper-id", paperID, "--model", settings.model, "--json"], settings: settings)
             try await self?.runCommand(["restyle", "--paper-id", paperID, "--json"], settings: settings)
         }
     }
@@ -513,7 +548,7 @@ final class TranslatorModel: ObservableObject {
         startWorkflow(paperID: paperID, title: "PDF 번역") { [weak self] in
             try await self?.runCommand(["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--json"], settings: settings)
             try Self.validateModelEndpoint(settings: settings)
-            try await self?.runCommand(["translate", "--paper-id", paperID, "--json"], settings: settings)
+            try await self?.runCommand(["translate", "--paper-id", paperID, "--model", settings.model, "--json"], settings: settings)
             try await self?.runCommand(["restyle", "--paper-id", paperID, "--json"], settings: settings)
         }
     }
@@ -556,7 +591,8 @@ final class TranslatorModel: ObservableObject {
         RuntimeSettings(
             repoPath: repoPath,
             baseURLOverride: baseURLOverride.trimmingCharacters(in: .whitespacesAndNewlines),
-            apiKeyOverride: apiKeyOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+            apiKeyOverride: apiKeyOverride.trimmingCharacters(in: .whitespacesAndNewlines),
+            model: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
         )
     }
 

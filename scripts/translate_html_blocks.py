@@ -434,6 +434,12 @@ document.addEventListener("DOMContentLoaded", function () {
     spacer.style.height = `${Math.ceil(height)}px`;
     element.parentNode.insertBefore(spacer, element);
   }
+  function releaseSyncGuard() {
+    window.setTimeout(() => {
+      captureScrollPositions();
+      isSyncing = false;
+    }, 120);
+  }
   function alignParallelColumns() {
     if (!isParallelActive()) return;
     removeAlignmentSpacers();
@@ -471,16 +477,15 @@ document.addEventListener("DOMContentLoaded", function () {
           .filter((item) => item.target)
       : [];
     if (targetPairs.length) {
-      const referenceTop = Math.max(
-        ...targetPairs.map((item) => scrollContentTop(item.target, item.column))
-      );
-      const nextTop = referenceTop - 46 - snapshot.offset;
-      columns.forEach((column) => {
-        column.scrollTop = clampScrollTop(column, nextTop);
+      isSyncing = true;
+      targetPairs.forEach((item) => {
+        const nextTop = scrollContentTop(item.target, item.column) - 46 - snapshot.offset;
+        item.column.scrollTop = clampScrollTop(item.column, nextTop);
       });
-      captureScrollPositions();
+      releaseSyncGuard();
       return;
     }
+    isSyncing = true;
     const maxScroll = Math.min(
       ...columns.map((column) => Math.max(0, column.scrollHeight - column.clientHeight))
     );
@@ -488,7 +493,7 @@ document.addEventListener("DOMContentLoaded", function () {
     columns.forEach((column) => {
       column.scrollTop = clampScrollTop(column, nextTop);
     });
-    captureScrollPositions();
+    releaseSyncGuard();
   }
   function scheduleParallelAlignment(preservePosition = true) {
     if (alignmentTimer) {
@@ -528,9 +533,14 @@ document.addEventListener("DOMContentLoaded", function () {
   function snapshotFromContainer(container, scrollElement) {
     if (!container) return null;
     const top = scrollElement ? scrollElement.getBoundingClientRect().top + 46 : viewportTop();
-    const candidates = Array.from(container.querySelectorAll("[id]")).filter(
-      (element) => !String(element.id).startsWith("codex-")
+    let candidates = Array.from(container.querySelectorAll(alignmentAnchorSelector)).filter(
+      (element) => element.id && !String(element.id).startsWith("codex-")
     );
+    if (!candidates.length) {
+      candidates = Array.from(container.querySelectorAll("[id]")).filter(
+        (element) => !String(element.id).startsWith("codex-")
+      );
+    }
     let best = null;
     for (const element of candidates) {
       const rect = element.getBoundingClientRect();
@@ -785,7 +795,7 @@ def call_api(base_url: str, api_key: str, model: str, batch: list[tuple[str, str
                 ),
             },
         ],
-        "temperature": 0,
+        "temperature": 0.3,
     }
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     last: Exception | None = None
