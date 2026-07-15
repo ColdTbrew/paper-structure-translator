@@ -2,11 +2,21 @@
 
 [English](README.md) | [한국어](README.ko.md)
 
-ar5iv HTML을 입력으로 받아, 깔끔한 한국어 논문 리더 HTML을 만드는 OpenAI 호환 파이프라인입니다.
+네이티브 macOS 작업 공간, ChatGPT/Codex 구독 로그인, OpenAI 호환 API를 지원하는 구조 보존형 한국어 논문 번역기입니다.
 
 목표는 논문 요약이 아닙니다. 원문 논문의 구조와 읽는 흐름을 최대한 유지하면서, 본문 텍스트를 가능한 한 직역에 가깝게 번역하는 것이 목표입니다.
 
 ## 미리보기
+
+네이티브 macOS 앱에서 arXiv/ar5iv 링크를 입력하거나 PDF를 끌어다 놓습니다.
+
+![Paper Translator 문서 가져오기](docs/paper-translator-lingopaper-v2.png)
+
+문서 가져오기부터 구조 보존 번역 진행 상황, 최종 논문 읽기까지 하나의 작업 공간에서 처리합니다.
+
+| 번역 진행 | 내장 논문 리더 |
+| --- | --- |
+| ![구조 보존 번역 진행 화면](docs/paper-translator-progress.png) | ![Paper Translator 내장 리더](docs/paper-translator-reader.png) |
 
 생성된 HTML은 조용한 논문 리더처럼 보이도록 설계되어 있습니다. 그림과 표는 제자리에 남고, 인용과 링크는 유지되며, 번역된 본문은 한 줄씩 읽기 좋게 표시됩니다.
 
@@ -28,6 +38,9 @@ ar5iv HTML을 입력으로 받아, 깔끔한 한국어 논문 리더 HTML을 만
 - 한국어 단독 HTML과 영어/한국어 병행 HTML을 모두 생성합니다.
 - 병행 리더에서 선택 가능한 스크롤 동기화를 제공합니다.
 - JSONL 캐시를 작성해 중단된 번역 작업을 이어서 실행할 수 있습니다.
+- 링크/PDF 가져오기, 실시간 진행 상황, 결과 읽기를 제공하는 네이티브 SwiftUI macOS 앱을 포함합니다.
+- OAuth 토큰을 앱에 복사하지 않고 ChatGPT/Codex 구독 인증을 사용할 수 있습니다.
+- OpenAI 호환 API 키와 사용자 지정 Base URL 방식도 별도 provider로 유지합니다.
 
 ## 에이전트 바로 사용
 
@@ -39,8 +52,39 @@ ar5iv HTML을 입력으로 받아, 깔끔한 한국어 논문 리더 HTML을 만
 
 ## 설정
 
+먼저 로컬 런타임을 설치합니다.
+
 ```bash
 uv sync
+```
+
+그다음 인증 방식 하나를 선택합니다.
+
+### 방법 A: ChatGPT / Codex 구독
+
+Codex CLI를 설치한 뒤 앱 설정 화면에서 ChatGPT로 로그인하거나 다음 명령을 사용합니다.
+
+```bash
+codex login
+codex login status
+```
+
+로그인, 자격증명 저장, 토큰 갱신은 Codex에 위임합니다. Paper Translator는 OAuth 토큰을 직접 읽거나 저장하지 않습니다. 설정에서 `ChatGPT / Codex 구독`을 선택한 뒤 모델을 고릅니다.
+
+CLI에서도 같은 provider를 사용할 수 있습니다.
+
+```bash
+./paper-translator translate \
+  --paper-id mmdocrag \
+  --provider codex \
+  --model gpt-5.4-mini
+```
+
+### 방법 B: OpenAI 호환 API
+
+로컬 환경 파일을 만듭니다.
+
+```bash
 cp .env.example .env
 ```
 
@@ -53,9 +97,11 @@ OPENAI_BASE_URL=http://host:port/v1
 
 `.env`, 다운로드한 소스, 캐시, 생성된 HTML 출력물은 git에서 무시됩니다.
 
+macOS 앱에서는 `OpenAI 호환 API`를 선택해 OpenAI Base URL과 모델을 바꾸거나 API 키를 임시로 입력할 수 있습니다. 덮어쓰기 입력칸을 비워두면 해당 `.env` 값을 사용합니다.
+
 ## 빠른 시작
 
-먼저 로컬 환경을 확인합니다.
+OpenAI 호환 API provider를 사용할 때는 먼저 로컬 환경을 확인합니다.
 
 ```bash
 ./paper-translator doctor
@@ -83,7 +129,7 @@ OPENAI_BASE_URL=http://host:port/v1
   --dry-run
 ```
 
-그다음 실제 번역을 실행합니다.
+그다음 실제 번역을 실행합니다. 기본 provider는 `api`이며, 로그인된 ChatGPT/Codex 구독을 쓰려면 `--provider codex`를 전달합니다.
 
 ```bash
 ./paper-translator translate --paper-id mmdocrag
@@ -101,9 +147,7 @@ outputs/mmdocrag.ko-en.paper.html
 
 ## macOS 앱
 
-이 레포에는 로컬 데스크톱에서 쓰기 위한 작은 SwiftUI 래퍼 앱도 포함되어 있습니다. macOS 인터페이스는 SwiftUI 네이티브로 작성했고, 번역 엔진은 `./paper-translator`와 같은 `uv` 관리 Python 파이프라인을 사용합니다.
-
-![Paper Translator macOS 앱](docs/macos-app.png)
+이 레포에는 로컬 데스크톱용 네이티브 SwiftUI 작업 공간이 포함되어 있습니다. 인터페이스와 내장 리더는 macOS 네이티브 구성 요소를 사용하고, 번역 엔진은 `./paper-translator`와 같은 `uv` 관리 Python 파이프라인으로 실행됩니다.
 
 앱 런타임은 다음 명령으로 준비합니다.
 
@@ -131,12 +175,21 @@ dist/Paper Translator.app
 
 앱에서 할 수 있는 일:
 
-- 로컬 PDF를 드래그 앤 드롭하면 `pdf-import`, `translate`, `restyle` 순서로 실행합니다.
-- arXiv/ar5iv HTML URL을 복사한 뒤 `클립보드 URL 번역`을 누르면 `fetch`, `translate`, `restyle` 순서로 실행합니다.
-- CLI 진행 로그를 앱 안에서 실시간으로 확인합니다.
-- 한국어 단독 HTML 또는 영어/한국어 병행 HTML을 바로 엽니다.
+- arXiv/ar5iv 링크를 붙여넣거나 로컬 PDF를 드래그 앤 드롭합니다.
+- 문서 가져오기, 구조 분석, 번역, 리더 스타일 적용 단계를 구분해 확인합니다.
+- 그림, 표, 수식, 인용의 보존 상태를 확인합니다.
+- 한국어 번역본을 읽거나 영어/한국어 비교 보기로 전환합니다.
+- 생성된 HTML 또는 2열 병행 리더를 엽니다.
+- ChatGPT/Codex 구독과 OpenAI 호환 API 중 인증 방식을 선택합니다.
+- GPT-5.6 Sol, Terra, Luna 또는 설정된 다른 모델을 선택합니다.
 
-앱은 레포에서 실행될 때 이 레포 경로를 자동 감지하며, 설정 패널에서 경로를 수정할 수 있습니다. API key와 base URL 입력칸은 비워두면 `.env`를 사용합니다. 앱에서 임시로 덮어쓸 때만 값을 넣으면 됩니다.
+앱은 레포에서 실행될 때 이 레포 경로를 자동 감지하며, 설정에서 프로젝트 경로를 수정할 수 있습니다.
+
+### 설정의 Codex OAuth
+
+![ChatGPT와 Codex 구독 로그인](docs/paper-translator-codex-oauth.png)
+
+`ChatGPT / Codex 구독`은 로컬에 설치된 Codex 런타임을 사용합니다. `ChatGPT로 로그인`은 Codex가 관리하는 브라우저 로그인을 열고, `상태 확인`은 Paper Translator에 토큰을 노출하지 않은 채 현재 계정을 확인합니다. 구현은 [Codex app-server 프로토콜](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)에 설명된 관리형 인증 경계를 따릅니다.
 
 ## 다른 논문 번역하기
 
@@ -205,6 +258,7 @@ PDF 경로는 ar5iv HTML보다 구조 복원력이 낮습니다. 대신 LitePars
 - `paper-translator`: `uv`를 통해 `scripts/paper_translator.py`를 실행하는 CLI 래퍼입니다.
 - `scripts/paper_translator.py`: `doctor`, `fetch`, `translate`, `restyle`, `serve`를 제공하는 에이전트 친화 CLI입니다.
 - `scripts/translate_html_blocks.py`: 태그를 마스킹하고, 텍스트 블록을 번역하고, 태그를 복원한 뒤 논문 리더 HTML을 작성합니다.
+- `scripts/codex_translation_schema.json`: Codex 구독 번역 배치가 결정적인 `{id, text}` JSON 결과를 반환하도록 제한합니다.
 - `scripts/apply_paper_viewer_style.py`: 리더 CSS를 다시 적용하고, ar5iv asset 링크를 고치며, 선택적으로 원본 표 HTML을 복원합니다.
 - `scripts/bootstrap_python_env.sh`: `uv` 없이 `.venv`를 만들고 Python 런타임 의존성을 설치합니다.
 - `scripts/build_macos_app.sh`: SwiftUI 데스크톱 래퍼를 `dist/Paper Translator.app`으로 빌드합니다.

@@ -2,6 +2,7 @@ import AppKit
 import Network
 import SwiftUI
 import UniformTypeIdentifiers
+import WebKit
 
 @main
 struct PaperTranslatorMacApp: App {
@@ -9,16 +10,997 @@ struct PaperTranslatorMacApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            WorkspaceView()
                 .environmentObject(model)
-                .frame(minWidth: 760, minHeight: 620)
+                .frame(minWidth: 820, minHeight: 640)
         }
         .windowStyle(.titleBar)
     }
 }
 
+private enum WorkspaceStage {
+    case importDocument
+    case translating
+    case reader
+}
+
+private enum ImportMode: String, CaseIterable, Identifiable {
+    case web = "웹 링크"
+    case pdf = "PDF 파일"
+
+    var id: String { rawValue }
+}
+
+private enum SidebarDestination {
+    case translation
+    case recent
+    case settings
+}
+
+struct WorkspaceView: View {
+    @EnvironmentObject private var model: TranslatorModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var stage: WorkspaceStage = .importDocument
+    @State private var destination: SidebarDestination = .translation
+    @State private var importMode: ImportMode = .web
+    @State private var sourceURL = ""
+    @State private var isDropTargeted = false
+    @State private var isFileImporterPresented = false
+    @State private var readerScrollTarget: String?
+    @State private var loadedReaderHeadings: [ReaderHeading] = []
+    private let readerPreviewEnabled: Bool
+
+    init() {
+        let preview = ProcessInfo.processInfo.environment["PAPER_TRANSLATOR_UI_PREVIEW"]
+        let isProgressPreview = preview == "progress" || ProcessInfo.processInfo.arguments.contains("--preview-progress")
+        readerPreviewEnabled = ProcessInfo.processInfo.arguments.contains("--preview-reader")
+        _stage = State(initialValue: readerPreviewEnabled ? .reader : isProgressPreview ? .translating : .importDocument)
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if !(destination == .translation && stage == .reader) {
+                sidebar
+                Divider()
+            }
+            mainContent
+        }
+        .background(WorkspacePalette.canvas)
+        .fileImporter(
+            isPresented: $isFileImporterPresented,
+            allowedContentTypes: [.pdf],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            model.translatePDF(url)
+        }
+        .onChange(of: model.isRunning) { running in
+            if running {
+                destination = .translation
+                stage = .translating
+            }
+        }
+        .onChange(of: model.statusText) { status in
+            if status == "완료", !model.lastPaperID.isEmpty {
+                stage = .reader
+            }
+        }
+        .animation(reduceMotion ? .linear(duration: 0.12) : .spring(response: 0.34, dampingFraction: 0.92), value: stage)
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SidebarButton(title: "새 번역", icon: "plus", isSelected: destination == .translation) {
+                destination = .translation
+                stage = .importDocument
+                importMode = .web
+                sourceURL = ""
+            }
+            SidebarButton(title: "최근 문서", icon: "clock", isSelected: destination == .recent) {
+                destination = .recent
+            }
+            SidebarButton(title: "내 문서", icon: "doc", isSelected: false) {
+                model.openOutputsFolder()
+            }
+            SidebarButton(title: "설정", icon: "gearshape", isSelected: destination == .settings) {
+                destination = .settings
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                Image(systemName: "questionmark.circle")
+                Text("도움말")
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(WorkspacePalette.secondaryText)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+        }
+        .padding(.vertical, 14)
+        .frame(width: 156, alignment: .topLeading)
+        .background(.ultraThinMaterial)
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
+        switch destination {
+        case .translation:
+            switch stage {
+            case .importDocument:
+                importScreen
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
+            case .translating:
+                progressScreen
+                    .transition(.opacity)
+            case .reader:
+                readerScreen
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+            }
+        case .recent:
+            recentScreen
+        case .settings:
+            settingsScreen
+        }
+    }
+
+    private var importScreen: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                screenHeader(
+                    step: "1",
+                    title: "문서 가져오기",
+                    subtitle: "웹 링크 또는 PDF 파일을 추가하세요."
+                )
+
+                ImportModeSelector(selection: $importMode)
+
+                if importMode == .web {
+                    urlImportPanel
+                } else {
+                    pdfImportPanel
+                }
+
+                HStack(spacing: 14) {
+                    LanguageMenu(title: "원본 언어", value: "자동 감지", icon: "character.book.closed")
+                    LanguageMenu(title: "번역 언어", value: "한국어", icon: "globe")
+                }
+
+                Button {
+                    if importMode == .web {
+                        model.translateURL(sourceURL)
+                    } else {
+                        isFileImporterPresented = true
+                    }
+                } label: {
+                    HStack {
+                        Spacer()
+                        Text(importMode == .web ? "번역 시작" : "PDF 선택")
+                        Image(systemName: "arrow.right")
+                        Spacer()
+                    }
+                }
+                .buttonStyle(WorkspacePrimaryButtonStyle())
+                .disabled(importMode == .web && sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .frame(maxWidth: 540, alignment: .leading)
+            .padding(.horizontal, 42)
+            .padding(.vertical, 34)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private var urlImportPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("논문 링크")
+                .font(.system(size: 13, weight: .semibold))
+            HStack(spacing: 8) {
+                TextField("https://arxiv.org/abs/...", text: $sourceURL)
+                    .textFieldStyle(WorkspaceTextFieldStyle())
+                    .onSubmit { model.translateURL(sourceURL) }
+                Button {
+                    sourceURL = NSPasteboard.general.string(forType: .string) ?? ""
+                } label: {
+                    Image(systemName: "link")
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(WorkspaceIconButtonStyle())
+                .help("클립보드에서 붙여넣기")
+            }
+
+            DividerLabel(text: "또는")
+
+            pdfDropZone(compact: true)
+        }
+    }
+
+    private var pdfImportPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("PDF 파일")
+                .font(.system(size: 13, weight: .semibold))
+            pdfDropZone(compact: false)
+        }
+    }
+
+    private func pdfDropZone(compact: Bool) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: isDropTargeted ? "doc.fill.badge.plus" : "doc.badge.plus")
+                .font(.system(size: compact ? 28 : 36, weight: .regular))
+                .foregroundStyle(isDropTargeted ? WorkspacePalette.blue : WorkspacePalette.secondaryText)
+            Text(isDropTargeted ? "놓아서 번역 시작" : "PDF 파일을 드래그하거나 클릭하여 선택하세요.")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(WorkspacePalette.secondaryText)
+            Text("최대 200MB")
+                .font(.system(size: 11))
+                .foregroundStyle(WorkspacePalette.tertiaryText)
+        }
+        .frame(maxWidth: .infinity, minHeight: compact ? 148 : 190)
+        .background(isDropTargeted ? WorkspacePalette.blue.opacity(0.07) : WorkspacePalette.controlFill)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(
+                    isDropTargeted ? WorkspacePalette.blue : WorkspacePalette.border,
+                    style: StrokeStyle(lineWidth: isDropTargeted ? 1.5 : 1, dash: [5, 4])
+                )
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { isFileImporterPresented = true }
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted) { providers in
+            model.handleDrop(providers: providers)
+        }
+        .scaleEffect(isDropTargeted ? 1.006 : 1)
+        .animation(reduceMotion ? .linear(duration: 0.1) : .spring(response: 0.28, dampingFraction: 0.84), value: isDropTargeted)
+        .accessibilityLabel("PDF 가져오기")
+        .accessibilityHint("클릭하거나 PDF 파일을 끌어다 놓으세요")
+    }
+
+    private var progressScreen: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            screenHeader(
+                step: "2",
+                title: "번역 진행 중",
+                subtitle: "문서 구조를 보존하며 한국어로 번역하고 있습니다."
+            )
+
+            HStack(spacing: 14) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundStyle(WorkspacePalette.secondaryText)
+                    .frame(width: 48, height: 58)
+                    .background(WorkspacePalette.controlFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(WorkspacePalette.border))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(model.lastPaperID.isEmpty ? "선택한 논문" : model.lastPaperID)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+                    Text("구조 보존 한국어 번역")
+                        .font(.system(size: 12))
+                        .foregroundStyle(WorkspacePalette.secondaryText)
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 42) {
+                progressRing
+                progressTimeline
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("구조 보존 상태")
+                    .font(.system(size: 13, weight: .semibold))
+                HStack(spacing: 10) {
+                    PreservationCard(title: "그림", icon: "photo", state: "보존 중")
+                    PreservationCard(title: "표", icon: "tablecells", state: "보존 중")
+                    PreservationCard(title: "수식", icon: "function", state: "보존 중")
+                    PreservationCard(title: "인용", icon: "quote.opening", state: "보존 중")
+                }
+            }
+
+            Spacer()
+
+            HStack {
+                Text(model.progressLabel)
+                    .font(.system(size: 12))
+                    .foregroundStyle(WorkspacePalette.secondaryText)
+                Spacer()
+                Button("취소") { model.cancel() }
+                    .buttonStyle(WorkspaceSecondaryButtonStyle())
+            }
+        }
+        .padding(.horizontal, 42)
+        .padding(.vertical, 34)
+    }
+
+    private var progressRing: some View {
+        ZStack {
+            Circle()
+                .stroke(WorkspacePalette.blue.opacity(0.10), lineWidth: 9)
+            Circle()
+                .trim(from: 0, to: max(model.progressFraction, model.progressTotal == 0 ? 0.08 : 0))
+                .stroke(WorkspacePalette.blue, style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            VStack(spacing: 4) {
+                Text(model.progressTotal > 0 ? "\(Int(model.progressFraction * 100))%" : "…")
+                    .font(.system(size: 32, weight: .semibold, design: .rounded))
+                    .tracking(-1)
+                Text("번역 중")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(WorkspacePalette.secondaryText)
+            }
+        }
+        .frame(width: 150, height: 150)
+        .animation(reduceMotion ? .linear(duration: 0.1) : .spring(response: 0.4, dampingFraction: 1), value: model.progressFraction)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("번역 진행률")
+        .accessibilityValue(model.progressTotal > 0 ? "\(Int(model.progressFraction * 100))퍼센트" : "준비 중")
+    }
+
+    private var progressTimeline: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TimelineRow(title: "문서 가져오기", detail: "완료", state: .complete)
+            TimelineRow(title: "구조 분석", detail: "완료", state: .complete)
+            TimelineRow(title: "번역", detail: model.progressLabel, state: .current)
+            TimelineRow(title: "문서 스타일 적용", detail: "대기 중", state: .pending, showsLine: false)
+        }
+        .frame(maxWidth: 280)
+    }
+
+    private var readerScreen: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button {
+                    stage = .importDocument
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(WorkspaceIconButtonStyle())
+
+                Picker("보기", selection: .constant(0)) {
+                    Text("번역본").tag(0)
+                    Text("원문 비교").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 168)
+
+                Spacer()
+
+                Text(readerPaperID)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(WorkspacePalette.secondaryText)
+                    .lineLimit(1)
+
+                Button("HTML") { model.openOutput(kind: .korean) }
+                    .buttonStyle(WorkspaceSecondaryButtonStyle())
+                Button("한영 비교") { model.openOutput(kind: .bilingual) }
+                    .buttonStyle(WorkspacePrimaryButtonStyle(compact: true))
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(.thinMaterial)
+
+            Divider()
+
+            if let url = readerURL {
+                HStack(spacing: 0) {
+                    ReaderOutline(headings: loadedReaderHeadings, selectedAnchor: $readerScrollTarget)
+                    Divider()
+                    PaperWebPreview(url: url, scrollTarget: readerScrollTarget)
+                        .accessibilityHidden(readerPreviewEnabled)
+                }
+                .onAppear {
+                    if loadedReaderHeadings.isEmpty {
+                        loadedReaderHeadings = ReaderHeadingParser.parse(url: url)
+                    }
+                }
+            } else {
+                EmptyDocumentView(
+                    title: "미리볼 결과가 없습니다",
+                    subtitle: "새 번역을 시작하면 이곳에서 결과를 읽을 수 있습니다."
+                )
+            }
+        }
+    }
+
+    private var recentScreen: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            screenHeader(step: nil, title: "최근 문서", subtitle: "최근에 번역한 논문을 다시 엽니다.")
+            if model.lastPaperID.isEmpty {
+                EmptyDocumentView(title: "아직 번역한 문서가 없습니다", subtitle: "새 번역에서 첫 문서를 추가해 보세요.")
+            } else {
+                Button {
+                    destination = .translation
+                    stage = .reader
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 22))
+                            .foregroundStyle(WorkspacePalette.blue)
+                            .frame(width: 44, height: 52)
+                            .background(WorkspacePalette.blue.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(model.lastPaperID)
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("한국어 번역 · HTML")
+                                .font(.system(size: 12))
+                                .foregroundStyle(WorkspacePalette.secondaryText)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(WorkspacePalette.tertiaryText)
+                    }
+                    .padding(14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(WorkspacePalette.panel)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(WorkspacePalette.border))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 42)
+        .padding(.vertical, 34)
+    }
+
+    private var settingsScreen: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                screenHeader(step: nil, title: "설정", subtitle: "번역 엔진과 프로젝트 경로를 관리합니다.")
+
+                VStack(spacing: 0) {
+                    SettingRow(title: "프로젝트") {
+                        TextField("프로젝트 경로", text: $model.repoPath)
+                            .textFieldStyle(WorkspaceTextFieldStyle())
+                    }
+                    Divider().padding(.leading, 18)
+                    SettingRow(title: "인증 방식") {
+                        Picker("인증 방식", selection: $model.selectedProvider) {
+                            ForEach(TranslationProvider.allCases) { provider in
+                                Text(provider.displayName).tag(provider)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Divider().padding(.leading, 18)
+                    if model.selectedProvider == .codex {
+                        SettingRow(title: "Codex 계정") {
+                            HStack(spacing: 10) {
+                                Circle()
+                                    .fill(model.isCodexAuthenticated ? WorkspacePalette.success : WorkspacePalette.tertiaryText)
+                                    .frame(width: 8, height: 8)
+                                Text(model.codexAuthStatus)
+                                    .foregroundStyle(WorkspacePalette.secondaryText)
+                                Spacer()
+                                Button("상태 확인") { model.refreshCodexStatus() }
+                                    .buttonStyle(WorkspaceSecondaryButtonStyle())
+                                Button("ChatGPT로 로그인") { model.startCodexLogin() }
+                                    .buttonStyle(WorkspacePrimaryButtonStyle(compact: true))
+                            }
+                        }
+                        Divider().padding(.leading, 18)
+                    } else {
+                        SettingRow(title: "OpenAI Base URL") {
+                            TextField("비워두면 .env의 OPENAI_BASE_URL 사용", text: $model.baseURLOverride)
+                                .textFieldStyle(WorkspaceTextFieldStyle())
+                        }
+                        Divider().padding(.leading, 18)
+                    }
+                    SettingRow(title: "모델") {
+                        Picker("모델", selection: $model.selectedModel) {
+                            ForEach(TranslatorModel.modelOptions, id: \.id) { option in
+                                Text(option.displayName).tag(option.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if model.selectedProvider == .api {
+                        Divider().padding(.leading, 18)
+                        SettingRow(title: "API 키") {
+                            SecureField("앱에는 저장되지 않습니다", text: $model.apiKeyOverride)
+                                .textFieldStyle(WorkspaceTextFieldStyle())
+                        }
+                    }
+                }
+                .background(WorkspacePalette.panel)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(WorkspacePalette.border))
+
+                HStack {
+                    Button("연결 확인") { model.checkConnection() }
+                        .buttonStyle(WorkspaceSecondaryButtonStyle())
+                        .disabled(model.isRunning)
+                    Spacer()
+                    Button("설정 저장") { model.saveSettings() }
+                        .buttonStyle(WorkspacePrimaryButtonStyle(compact: true))
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("진행 로그")
+                        .font(.system(size: 13, weight: .semibold))
+                    ScrollView {
+                        Text(model.logText.isEmpty ? "대기 중입니다." : model.logText)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(WorkspacePalette.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(minHeight: 120)
+                    .padding(12)
+                    .background(WorkspacePalette.controlFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+            }
+            .padding(.horizontal, 42)
+            .padding(.vertical, 34)
+        }
+    }
+
+    private func screenHeader(step: String?, title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 9) {
+                Text(step.map { "\($0). \(title)" } ?? title)
+                    .font(.system(size: 19, weight: .bold))
+                    .tracking(-0.2)
+            }
+            Text(subtitle)
+                .font(.system(size: 13))
+                .foregroundStyle(WorkspacePalette.secondaryText)
+        }
+    }
+
+    private var readerPaperID: String {
+        readerPreviewEnabled ? "mmdocrag" : model.lastPaperID
+    }
+
+    private var readerURL: URL? {
+        if readerPreviewEnabled {
+            let url = URL(fileURLWithPath: model.repoPath)
+                .appendingPathComponent("outputs/mmdocrag.ko.paper.html")
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
+        return model.outputURL(kind: .korean)
+    }
+
+}
+
+private enum TimelineState {
+    case complete
+    case current
+    case pending
+}
+
+private struct ImportModeSelector: View {
+    @Binding var selection: ImportMode
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(ImportMode.allCases) { mode in
+                Button {
+                    selection = mode
+                } label: {
+                    Text(mode.rawValue)
+                        .font(.system(size: 12, weight: selection == mode ? .semibold : .medium))
+                        .foregroundStyle(selection == mode ? WorkspacePalette.blue : Color.primary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+                        .background(selection == mode ? WorkspacePalette.blue.opacity(0.06) : Color.clear)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(selection == mode ? WorkspacePalette.blue : Color.clear, lineWidth: 1.5)
+                }
+            }
+        }
+        .padding(2)
+        .background(WorkspacePalette.controlFill)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspacePalette.border))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("가져오기 방식")
+    }
+}
+
+private struct SidebarButton: View {
+    let title: String
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .frame(width: 18)
+                Text(title)
+                Spacer()
+            }
+            .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+            .foregroundStyle(isSelected ? WorkspacePalette.blue : WorkspacePalette.secondaryText)
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .background(isSelected ? WorkspacePalette.blue.opacity(0.10) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+    }
+}
+
+private struct LanguageMenu: View {
+    let title: String
+    let value: String
+    let icon: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .foregroundStyle(WorkspacePalette.blue)
+                Text(value)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(WorkspacePalette.tertiaryText)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .background(WorkspacePalette.controlFill)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspacePalette.border))
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct DividerLabel: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Rectangle().fill(WorkspacePalette.border).frame(height: 1)
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundStyle(WorkspacePalette.tertiaryText)
+            Rectangle().fill(WorkspacePalette.border).frame(height: 1)
+        }
+    }
+}
+
+private struct PreservationCard: View {
+    let title: String
+    let icon: String
+    let state: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+            Label(state, systemImage: "checkmark.circle.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(WorkspacePalette.success)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(WorkspacePalette.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(WorkspacePalette.border))
+    }
+}
+
+private struct TimelineRow: View {
+    let title: String
+    let detail: String
+    let state: TimelineState
+    var showsLine = true
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(spacing: 0) {
+                ZStack {
+                    Circle()
+                        .fill(circleColor)
+                        .frame(width: 20, height: 20)
+                    Image(systemName: state == .complete ? "checkmark" : state == .current ? "circle.fill" : "")
+                        .font(.system(size: state == .current ? 7 : 10, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                if showsLine {
+                    Rectangle()
+                        .fill(WorkspacePalette.border)
+                        .frame(width: 1, height: 34)
+                }
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(WorkspacePalette.secondaryText)
+            }
+            .padding(.top, 1)
+            Spacer()
+        }
+    }
+
+    private var circleColor: Color {
+        switch state {
+        case .complete: return WorkspacePalette.success
+        case .current: return WorkspacePalette.blue
+        case .pending: return WorkspacePalette.border
+        }
+    }
+}
+
+private struct SettingRow<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(spacing: 18) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 118, alignment: .leading)
+            content
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+    }
+}
+
+private struct EmptyDocumentView: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(WorkspacePalette.tertiaryText)
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+            Text(subtitle)
+                .font(.system(size: 12))
+                .foregroundStyle(WorkspacePalette.secondaryText)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ReaderHeading: Identifiable {
+    let id: String
+    let title: String
+    let level: Int
+}
+
+private enum ReaderHeadingParser {
+    static func parse(url: URL) -> [ReaderHeading] {
+        guard let html = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        var headings: [ReaderHeading] = []
+        var sectionID: String?
+        var headingLevel: Int?
+        var headingHTML = ""
+
+        for rawLine in html.split(whereSeparator: \.isNewline) {
+            let line = String(rawLine)
+            if line.contains("<section"), let id = attribute(named: "id", in: line) {
+                sectionID = id
+            }
+
+            if headingLevel == nil {
+                if line.contains("<h2") {
+                    headingLevel = 2
+                    headingHTML = line
+                } else if line.contains("<h3") {
+                    headingLevel = 3
+                    headingHTML = line
+                }
+            } else {
+                headingHTML += " " + line
+            }
+
+            guard let level = headingLevel, headingHTML.contains("</h\(level)>") else { continue }
+            let title = headingHTML
+                .replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: "&amp;", with: "&")
+                .replacingOccurrences(of: "&nbsp;", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if let sectionID, !title.isEmpty {
+                headings.append(ReaderHeading(id: sectionID, title: title, level: level))
+            }
+            headingLevel = nil
+            headingHTML = ""
+            sectionID = nil
+            if headings.count == 18 { break }
+        }
+        return headings
+    }
+
+    private static func attribute(named name: String, in text: String) -> String? {
+        let marker = "\(name)=\""
+        guard let start = text.range(of: marker) else { return nil }
+        let suffix = text[start.upperBound...]
+        guard let end = suffix.firstIndex(of: "\"") else { return nil }
+        return String(suffix[..<end])
+    }
+}
+
+private struct ReaderOutline: View {
+    let headings: [ReaderHeading]
+    @Binding var selectedAnchor: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("목차")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(headings) { heading in
+                        Button {
+                            selectedAnchor = heading.id
+                        } label: {
+                            Text(heading.title)
+                                .font(.system(size: 11, weight: selectedAnchor == heading.id ? .semibold : .regular))
+                                .foregroundStyle(selectedAnchor == heading.id ? WorkspacePalette.blue : WorkspacePalette.secondaryText)
+                                .lineLimit(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.leading, heading.level == 3 ? 12 : 0)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(selectedAnchor == heading.id ? WorkspacePalette.blue.opacity(0.10) : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 6)
+            }
+        }
+        .frame(width: 170)
+        .background(WorkspacePalette.panel.opacity(0.72))
+    }
+}
+
+private struct PaperWebPreview: NSViewRepresentable {
+    let url: URL
+    let scrollTarget: String?
+
+    final class Coordinator {
+        var lastScrollTarget: String?
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let view = WKWebView()
+        view.setValue(false, forKey: "drawsBackground")
+        return view
+    }
+
+    func updateNSView(_ view: WKWebView, context: Context) {
+        if view.url != url {
+            view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        }
+        guard let scrollTarget, context.coordinator.lastScrollTarget != scrollTarget else { return }
+        context.coordinator.lastScrollTarget = scrollTarget
+        let escaped = scrollTarget.replacingOccurrences(of: "'", with: "\\'")
+        view.evaluateJavaScript("document.getElementById('\(escaped)')?.scrollIntoView({behavior:'smooth', block:'start'});")
+    }
+}
+
+private enum WorkspacePalette {
+    static let canvas = Color(nsColor: .windowBackgroundColor)
+    static let panel = Color(nsColor: .controlBackgroundColor)
+    static let controlFill = Color(nsColor: .textBackgroundColor).opacity(0.78)
+    static let border = Color(nsColor: .separatorColor).opacity(0.72)
+    static let secondaryText = Color.secondary
+    static let tertiaryText = Color.secondary.opacity(0.62)
+    static let blue = Color(red: 0.12, green: 0.39, blue: 0.95)
+    static let success = Color(red: 0.25, green: 0.64, blue: 0.31)
+}
+
+private struct WorkspaceTextFieldStyle: TextFieldStyle {
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .textFieldStyle(.plain)
+            .font(.system(size: 13))
+            .padding(.horizontal, 11)
+            .frame(height: 38)
+            .background(WorkspacePalette.controlFill)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspacePalette.border))
+    }
+}
+
+private struct WorkspacePrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var compact = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, compact ? 14 : 18)
+            .frame(height: compact ? 34 : 44)
+            .background(
+                LinearGradient(
+                    colors: [
+                        WorkspacePalette.blue.opacity(isEnabled ? (configuration.isPressed ? 0.84 : 1) : 0.42),
+                        Color(red: 0.18, green: 0.48, blue: 1.0).opacity(isEnabled ? (configuration.isPressed ? 0.84 : 1) : 0.42)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: compact ? 8 : 9, style: .continuous))
+            .shadow(color: WorkspacePalette.blue.opacity(isEnabled ? 0.18 : 0), radius: 10, y: 4)
+            .scaleEffect(configuration.isPressed ? 0.975 : 1)
+            .animation(reduceMotion ? .linear(duration: 0.08) : .spring(response: 0.24, dampingFraction: 0.9), value: configuration.isPressed)
+    }
+}
+
+private struct WorkspaceSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(Color.primary)
+            .padding(.horizontal, 14)
+            .frame(height: 34)
+            .background(WorkspacePalette.controlFill.opacity(configuration.isPressed ? 0.65 : 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspacePalette.border))
+            .scaleEffect(configuration.isPressed ? 0.975 : 1)
+            .animation(reduceMotion ? .linear(duration: 0.08) : .spring(response: 0.24, dampingFraction: 0.9), value: configuration.isPressed)
+    }
+}
+
+private struct WorkspaceIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(WorkspacePalette.secondaryText)
+            .frame(width: 38, height: 38)
+            .background(WorkspacePalette.controlFill.opacity(configuration.isPressed ? 0.62 : 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspacePalette.border))
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var model: TranslatorModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isDropTargeted = false
 
     var body: some View {
@@ -43,121 +1025,160 @@ struct ContentView: View {
                     settingsPanel
                     logPanel
                 }
-                .padding(24)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 24)
             }
         }
-        .preferredColorScheme(.light)
     }
 
     private var glassBackground: some View {
         ZStack {
             LinearGradient(
-                colors: [
-                    Color(red: 0.98, green: 0.99, blue: 1.00),
-                    Color(red: 0.94, green: 0.98, blue: 0.98),
-                    Color(red: 0.99, green: 0.96, blue: 0.99)
-                ],
+                colors: colorScheme == .dark
+                    ? [Color(red: 0.08, green: 0.09, blue: 0.11), Color(red: 0.07, green: 0.11, blue: 0.12)]
+                    : [Color(red: 0.97, green: 0.98, blue: 1.00), Color(red: 0.93, green: 0.97, blue: 0.98)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            Circle()
-                .fill(AppPalette.accentTeal.opacity(0.18))
-                .frame(width: 360, height: 360)
-                .blur(radius: 60)
-                .offset(x: -330, y: -250)
-            Circle()
-                .fill(AppPalette.accentPurple.opacity(0.12))
-                .frame(width: 300, height: 300)
-                .blur(radius: 70)
-                .offset(x: 360, y: -150)
-            Circle()
-                .fill(AppPalette.accentTeal.opacity(0.14))
-                .frame(width: 320, height: 320)
-                .blur(radius: 80)
-                .offset(x: 280, y: 320)
-            Circle()
-                .fill(AppPalette.accentPink.opacity(0.12))
-                .frame(width: 260, height: 260)
-                .blur(radius: 70)
-                .offset(x: -230, y: 300)
+            if !reduceTransparency {
+                Circle()
+                    .fill(AppPalette.accentTeal.opacity(colorScheme == .dark ? 0.12 : 0.16))
+                    .frame(width: 440, height: 440)
+                    .blur(radius: 90)
+                    .offset(x: -360, y: -280)
+                Circle()
+                    .fill(AppPalette.accentBlue.opacity(colorScheme == .dark ? 0.10 : 0.11))
+                    .frame(width: 380, height: 380)
+                    .blur(radius: 100)
+                    .offset(x: 380, y: 300)
+            }
         }
         .ignoresSafeArea()
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 30, weight: .semibold))
-                .foregroundStyle(AppPalette.accentTeal)
-                .frame(width: 52, height: 52)
-                .background(AppPalette.glassStrong, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(glassStroke(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 2) {
+                .font(.system(size: 27, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 50, height: 50)
+                .background(AppPalette.accentGradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .shadow(color: AppPalette.accentTeal.opacity(0.24), radius: 12, y: 5)
+            VStack(alignment: .leading, spacing: 3) {
                 Text("Paper Translator")
-                    .font(AppTypography.display(size: 28, weight: .bold))
+                    .font(AppTypography.display(size: 26, weight: .bold))
+                    .tracking(-0.5)
                     .foregroundStyle(AppPalette.textPrimary)
-                Text("PDF 드롭 또는 클립보드 HTML URL로 구조 보존 한국어 논문 뷰어를 생성합니다.")
+                Text("논문의 구조를 지키며 읽기 좋은 한국어 문서로 바꿉니다.")
                     .font(AppTypography.korean(size: 14, weight: .medium))
                     .foregroundStyle(AppPalette.textSecondary)
             }
             Spacer()
             if model.isRunning {
-                ProgressView().controlSize(.small)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text(model.progressLabel)
+                            .font(AppTypography.korean(size: 12, weight: .medium))
+                            .foregroundStyle(AppPalette.textSecondary)
+                        Spacer()
+                        if model.progressTotal > 0 {
+                            Text("\(Int(model.progressFraction * 100))%")
+                                .font(AppTypography.korean(size: 12, weight: .semibold))
+                                .foregroundStyle(AppPalette.accentTeal)
+                        }
+                    }
+                    if model.progressTotal > 0 {
+                        ProgressView(value: model.progressFraction)
+                            .tint(AppPalette.accentTeal)
+                    } else {
+                        ProgressView()
+                    }
+                }
+                .frame(width: 300)
                 Button {
                     model.cancel()
                 } label: {
                     Label("중지", systemImage: "stop.fill")
                 }
                 .buttonStyle(GlassButtonStyle(kind: .secondary))
+            } else {
+                statusBadge
             }
         }
-        .padding(20)
-        .glassCard()
+        .padding(.horizontal, 2)
+        .padding(.vertical, 4)
+    }
+
+    private var statusBadge: some View {
+        HStack(spacing: 7) {
+            Image(systemName: model.statusText == "완료" ? "checkmark.circle.fill" : "circle.fill")
+                .font(.system(size: model.statusText == "완료" ? 13 : 7, weight: .semibold))
+                .foregroundStyle(model.statusText == "완료" ? AppPalette.accentTeal : AppPalette.textTertiary)
+            Text(model.statusText)
+                .font(AppTypography.korean(size: 12, weight: .semibold))
+        }
+        .foregroundStyle(AppPalette.textSecondary)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
+        .background(.thinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(AppPalette.stroke, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("현재 상태: \(model.statusText)")
     }
 
     private var dropZone: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "square.and.arrow.down")
-                .font(.system(size: 34, weight: .medium))
-                .foregroundStyle(isDropTargeted ? AppPalette.accentTeal : AppPalette.textSecondary)
-            Text("PDF를 여기에 드래그 앤 드롭")
-                .font(AppTypography.korean(size: 18, weight: .semibold))
+        VStack(spacing: 12) {
+            Image(systemName: isDropTargeted ? "arrow.down.doc.fill" : "arrow.down.doc")
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundStyle(isDropTargeted ? .white : AppPalette.accentTeal)
+                .frame(width: 58, height: 58)
+                .background(isDropTargeted ? AppPalette.accentTeal : AppPalette.accentTeal.opacity(0.10), in: Circle())
+                .scaleEffect(isDropTargeted ? 1.06 : 1)
+            Text(isDropTargeted ? "놓아서 번역 시작" : "PDF를 여기에 놓으세요")
+                .font(AppTypography.korean(size: 19, weight: .semibold))
                 .foregroundStyle(AppPalette.textPrimary)
-            Text("드롭하면 pdf-import -> translate -> restyle 순서로 실행합니다.")
+            Text("가져오기부터 번역, 문서 스타일 적용까지 자동으로 진행됩니다.")
                 .font(AppTypography.korean(size: 14, weight: .medium))
                 .foregroundStyle(AppPalette.textSecondary)
         }
-        .frame(maxWidth: .infinity, minHeight: 150)
-        .background(isDropTargeted ? AppPalette.accentTeal.opacity(0.14) : AppPalette.glass, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isDropTargeted ? AppPalette.accentTeal.opacity(0.42) : AppPalette.border, style: StrokeStyle(lineWidth: 1.3, dash: [8, 5])))
-        .shadow(color: AppPalette.shadow, radius: 18, y: 8)
+        .frame(maxWidth: .infinity, minHeight: 184)
+        .background(isDropTargeted ? AppPalette.accentTeal.opacity(0.15) : AppPalette.glass, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(isDropTargeted ? AppPalette.accentTeal.opacity(0.70) : AppPalette.stroke, style: StrokeStyle(lineWidth: isDropTargeted ? 2 : 1.2, dash: [9, 6])))
+        .shadow(color: isDropTargeted ? AppPalette.accentTeal.opacity(0.18) : AppPalette.shadow, radius: isDropTargeted ? 24 : 18, y: 8)
+        .scaleEffect(isDropTargeted ? 1.008 : 1)
+        .animation(reduceMotion ? .linear(duration: 0.12) : .spring(response: 0.32, dampingFraction: 0.82), value: isDropTargeted)
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted) { providers in
             model.handleDrop(providers: providers)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("PDF 번역 영역")
+        .accessibilityHint("PDF 파일을 끌어다 놓으면 번역을 시작합니다")
     }
 
     private var clipboardPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("HTML URL 번역", systemImage: "link")
+            sectionTitle("웹 논문 번역", systemImage: "link")
             VStack(alignment: .leading, spacing: 10) {
-                Text("클립보드에 있는 arXiv/ar5iv HTML URL을 읽어서 fetch -> translate -> restyle을 실행합니다.")
+                Text("클립보드의 arXiv 또는 ar5iv 주소를 읽어 바로 번역합니다.")
                     .font(AppTypography.korean(size: 14, weight: .medium))
                     .foregroundStyle(AppPalette.textSecondary)
                 HStack {
                     Button {
                         model.translateClipboardURL()
                     } label: {
-                        Label("클립보드 URL 번역", systemImage: "doc.on.clipboard")
+                        Label("붙여넣어 번역", systemImage: "doc.on.clipboard")
                     }
                     .buttonStyle(GlassButtonStyle(kind: .primary))
+                    .fixedSize()
                     .disabled(model.isRunning)
 
                     Button {
                         model.loadClipboardPreview()
                     } label: {
-                        Label("클립보드 확인", systemImage: "eye")
+                        Label("주소 확인", systemImage: "eye")
                     }
                     .buttonStyle(GlassButtonStyle(kind: .secondary))
+                    .fixedSize()
                     .disabled(model.isRunning)
 
                     Text(model.clipboardPreview)
@@ -167,6 +1188,7 @@ struct ContentView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard()
     }
 
@@ -175,26 +1197,28 @@ struct ContentView: View {
             sectionTitle("설정", systemImage: "slider.horizontal.3")
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
                 GridRow {
-                    Text("Repo")
+                    Text("프로젝트")
                     TextField("paper-structure-translator 경로", text: $model.repoPath)
                         .textFieldStyle(GlassTextFieldStyle())
                     Button("저장") {
                         model.saveSettings()
                     }
                     .buttonStyle(GlassButtonStyle(kind: .secondary))
+                    .fixedSize()
                 }
                 GridRow {
-                    Text("Base URL")
-                    TextField(".env를 쓰려면 비워두세요", text: $model.baseURLOverride)
+                    Text("OpenAI Base URL")
+                    TextField("비워두면 .env의 OPENAI_BASE_URL 사용", text: $model.baseURLOverride)
                         .textFieldStyle(GlassTextFieldStyle())
-                    Button("Doctor") {
+                    Button("연결 확인") {
                         model.runDoctor()
                     }
                     .buttonStyle(GlassButtonStyle(kind: .secondary))
+                    .fixedSize()
                     .disabled(model.isRunning)
                 }
                 GridRow {
-                    Text("Model")
+                    Text("모델")
                     Picker("Model", selection: $model.selectedModel) {
                         ForEach(TranslatorModel.modelOptions, id: \.id) { option in
                             Text(option.displayName).tag(option.id)
@@ -210,7 +1234,7 @@ struct ContentView: View {
                         .foregroundStyle(AppPalette.textTertiary)
                 }
                 GridRow {
-                    Text("API Key")
+                    Text("API 키")
                     SecureField(".env를 쓰려면 비워두세요", text: $model.apiKeyOverride)
                         .textFieldStyle(GlassTextFieldStyle())
                     Text("앱에는 저장하지 않습니다.")
@@ -225,7 +1249,7 @@ struct ContentView: View {
 
     private var outputPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionTitle("결과", systemImage: "checkmark.seal")
+            sectionTitle("번역 결과", systemImage: "checkmark.seal")
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.statusText)
                     .font(AppTypography.korean(size: 18, weight: .semibold))
@@ -239,20 +1263,23 @@ struct ContentView: View {
                     model.openOutput(kind: .korean)
                 } label: {
                     Label("한국어 열기", systemImage: "doc.text")
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(GlassButtonStyle(kind: .secondary))
+                .buttonStyle(GlassButtonStyle(kind: .primary))
                 .disabled(model.lastPaperID.isEmpty)
                 Button {
                     model.openOutput(kind: .bilingual)
                 } label: {
                     Label("한영 병행 열기", systemImage: "rectangle.split.2x1")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassButtonStyle(kind: .secondary))
                 .disabled(model.lastPaperID.isEmpty)
                 Button {
                     model.openOutputsFolder()
                 } label: {
-                    Label("outputs 열기", systemImage: "folder")
+                    Label("결과 폴더 열기", systemImage: "folder")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassButtonStyle(kind: .secondary))
             }
@@ -283,11 +1310,11 @@ struct ContentView: View {
 
     private var runtimePanel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("Runtime", systemImage: "cpu")
-            Label("SwiftUI native app", systemImage: "checkmark.circle")
-            Label("uv-managed Python runtime", systemImage: "checkmark.circle")
-            Label("same path as ./paper-translator", systemImage: "checkmark.circle")
-            Text("번역 엔진은 `uv run scripts/paper_translator.py`로 실행합니다. 처음 실행 전 `uv sync`로 의존성을 준비하세요.")
+            sectionTitle("실행 환경", systemImage: "cpu")
+            Label("macOS 네이티브 앱", systemImage: "checkmark.circle.fill")
+            Label("uv로 관리되는 Python", systemImage: "checkmark.circle.fill")
+            Label("CLI와 동일한 번역 경로", systemImage: "checkmark.circle.fill")
+            Text("처음 실행하기 전 프로젝트에서 `uv sync`로 의존성을 준비하세요.")
                 .font(AppTypography.korean(size: 12, weight: .regular))
                 .foregroundStyle(AppPalette.textSecondary)
         }
@@ -308,18 +1335,19 @@ struct ContentView: View {
 }
 
 private enum AppPalette {
-    static let textPrimary = Color(red: 0.11, green: 0.13, blue: 0.16)
-    static let textSecondary = Color(red: 0.36, green: 0.40, blue: 0.46)
-    static let textTertiary = Color(red: 0.55, green: 0.58, blue: 0.64)
-    static let glass = Color.white.opacity(0.62)
-    static let glassStrong = Color.white.opacity(0.78)
-    static let border = Color.white.opacity(0.72)
-    static let stroke = Color(red: 0.72, green: 0.78, blue: 0.84).opacity(0.38)
-    static let shadow = Color(red: 0.18, green: 0.24, blue: 0.31).opacity(0.13)
+    static let textPrimary = Color.primary
+    static let textSecondary = Color.secondary
+    static let textTertiary = Color.secondary.opacity(0.72)
+    static let glass = Color(nsColor: .controlBackgroundColor).opacity(0.58)
+    static let stroke = Color(nsColor: .separatorColor).opacity(0.55)
+    static let shadow = Color.black.opacity(0.12)
     static let accentTeal = Color(red: 0.12, green: 0.58, blue: 0.54)
     static let accentBlue = Color(red: 0.12, green: 0.44, blue: 0.78)
-    static let accentPurple = Color(red: 0.48, green: 0.30, blue: 0.75)
-    static let accentPink = Color(red: 0.82, green: 0.24, blue: 0.52)
+    static let accentGradient = LinearGradient(
+        colors: [accentTeal, accentBlue],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 }
 
 private enum AppTypography {
@@ -332,23 +1360,23 @@ private enum AppTypography {
     }
 }
 
-private let glassFill = AppPalette.glass
-
-private func glassStroke(cornerRadius: CGFloat = 8) -> some View {
-    RoundedRectangle(cornerRadius: cornerRadius)
+private func glassStroke(cornerRadius: CGFloat = 18) -> some View {
+    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         .strokeBorder(AppPalette.stroke, lineWidth: 1)
 }
 
 private struct GlassCardModifier: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     func body(content: Content) -> some View {
         content
             .padding(18)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-            .background(glassFill, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(glassStroke(cornerRadius: 8))
-            .shadow(color: AppPalette.shadow, radius: 24, x: 0, y: 14)
+            .background(reduceTransparency ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor)) : AnyShapeStyle(.ultraThinMaterial), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(AppPalette.glass, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(glassStroke(cornerRadius: 18))
+            .shadow(color: AppPalette.shadow, radius: 18, x: 0, y: 10)
             .overlay(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: [Color.white.opacity(0.70), Color.white.opacity(0.12)],
@@ -376,8 +1404,8 @@ private struct GlassTextFieldStyle: TextFieldStyle {
             .padding(.vertical, 8)
             .font(AppTypography.korean(size: 14, weight: .medium))
             .foregroundStyle(AppPalette.textPrimary)
-            .background(Color.white.opacity(0.66), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(AppPalette.stroke, lineWidth: 1))
+            .background(Color(nsColor: .textBackgroundColor).opacity(0.78), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(AppPalette.stroke, lineWidth: 1))
     }
 }
 
@@ -387,6 +1415,8 @@ private enum GlassButtonKind {
 }
 
 private struct GlassButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let kind: GlassButtonKind
 
     func makeBody(configuration: Configuration) -> some View {
@@ -396,31 +1426,24 @@ private struct GlassButtonStyle: ButtonStyle {
             .lineLimit(1)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .frame(maxWidth: kind == .secondary ? .infinity : nil)
-            .background(background(isPressed: configuration.isPressed), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(kind == .primary ? Color.white.opacity(0.35) : AppPalette.stroke, lineWidth: 1))
+            .background(background(isPressed: configuration.isPressed), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(kind == .primary ? Color.white.opacity(0.24) : AppPalette.stroke, lineWidth: 1))
             .shadow(color: AppPalette.shadow.opacity(configuration.isPressed ? 0.45 : 1.0), radius: configuration.isPressed ? 4 : 12, y: configuration.isPressed ? 2 : 7)
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.18), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(isEnabled ? 1 : 0.46)
+            .animation(reduceMotion ? .linear(duration: 0.08) : .spring(response: 0.24, dampingFraction: 0.88), value: configuration.isPressed)
     }
 
     private func background(isPressed: Bool) -> LinearGradient {
         let opacity = isPressed ? 0.76 : 0.90
         switch kind {
         case .primary:
-            return LinearGradient(
-                colors: [
-                    AppPalette.accentTeal.opacity(opacity),
-                    AppPalette.accentPurple.opacity(opacity * 0.88)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            return LinearGradient(colors: [AppPalette.accentTeal.opacity(opacity), AppPalette.accentBlue.opacity(opacity)], startPoint: .topLeading, endPoint: .bottomTrailing)
         case .secondary:
             return LinearGradient(
                 colors: [
-                    Color.white.opacity(isPressed ? 0.48 : 0.66),
-                    Color.white.opacity(isPressed ? 0.32 : 0.50)
+                    Color(nsColor: .controlBackgroundColor).opacity(isPressed ? 0.70 : 0.92),
+                    Color(nsColor: .controlBackgroundColor).opacity(isPressed ? 0.52 : 0.74)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -434,11 +1457,26 @@ enum OutputKind {
     case bilingual
 }
 
+enum TranslationProvider: String, CaseIterable, Identifiable {
+    case codex
+    case api
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .codex: return "ChatGPT / Codex 구독"
+        case .api: return "OpenAI 호환 API"
+        }
+    }
+}
+
 struct RuntimeSettings {
     let repoPath: String
     let baseURLOverride: String
     let apiKeyOverride: String
     let model: String
+    let provider: TranslationProvider
 }
 
 struct ModelOption {
@@ -449,17 +1487,22 @@ struct ModelOption {
 final class TranslatorModel: ObservableObject {
     static let defaultModel = "gpt-5.4-mini"
     static let modelOptions = [
+        ModelOption(displayName: "GPT-5.6 Sol", id: "gpt-5.6"),
+        ModelOption(displayName: "GPT-5.6 Terra", id: "gpt-5.6-terra"),
+        ModelOption(displayName: "GPT-5.6 Luna", id: "gpt-5.6-luna"),
         ModelOption(displayName: "GPT-5.5", id: "gpt-5.5"),
         ModelOption(displayName: "GPT-5.4", id: "gpt-5.4"),
-        ModelOption(displayName: "GPT-5.4-Mini", id: "gpt-5.4-mini"),
-        ModelOption(displayName: "GPT-5.3-Codex", id: "gpt-5.3-codex"),
-        ModelOption(displayName: "GPT-5.2", id: "gpt-5.2")
+        ModelOption(displayName: "GPT-5.4 Mini", id: "gpt-5.4-mini"),
+        ModelOption(displayName: "GPT-5.3 Codex", id: "gpt-5.3-codex")
     ]
 
     @Published var repoPath: String
     @Published var baseURLOverride: String
     @Published var apiKeyOverride = ""
     @Published var selectedModel: String
+    @Published var selectedProvider: TranslationProvider
+    @Published var codexAuthStatus = "상태를 확인해주세요"
+    @Published var isCodexAuthenticated = false
     @Published var clipboardPreview = ""
     @Published var logText = ""
     @Published var statusText = "대기"
@@ -467,22 +1510,41 @@ final class TranslatorModel: ObservableObject {
     @Published var lastKoreanOutput = ""
     @Published var lastBilingualOutput = ""
     @Published var isRunning = false
+    @Published var progressCompleted = 0
+    @Published var progressTotal = 0
+    @Published var progressLabel = "준비 중"
+
+    var progressFraction: Double {
+        guard progressTotal > 0 else { return 0 }
+        return min(1, max(0, Double(progressCompleted) / Double(progressTotal)))
+    }
 
     private var currentProcess: Process?
     private let defaults = UserDefaults.standard
 
     init() {
         let detectedRepo = Self.detectRepoPath() ?? FileManager.default.currentDirectoryPath
-        repoPath = defaults.string(forKey: "repoPath") ?? detectedRepo
+        let storedRepo = defaults.string(forKey: "repoPath")
+        if let storedRepo, Self.isLiteParseRepo(atPath: storedRepo) {
+            repoPath = storedRepo
+        } else {
+            repoPath = detectedRepo
+            defaults.set(detectedRepo, forKey: "repoPath")
+        }
         baseURLOverride = defaults.string(forKey: "baseURLOverride") ?? ""
         let storedModel = defaults.string(forKey: "selectedModel") ?? Self.defaultModel
         selectedModel = Self.modelOptions.contains { $0.id == storedModel } ? storedModel : Self.defaultModel
+        selectedProvider = TranslationProvider(rawValue: defaults.string(forKey: "selectedProvider") ?? "") ?? .api
+        if selectedProvider == .codex {
+            DispatchQueue.main.async { [weak self] in self?.refreshCodexStatus() }
+        }
     }
 
     func saveSettings() {
         defaults.set(repoPath, forKey: "repoPath")
         defaults.set(baseURLOverride, forKey: "baseURLOverride")
         defaults.set(selectedModel, forKey: "selectedModel")
+        defaults.set(selectedProvider.rawValue, forKey: "selectedProvider")
         appendLog("settings saved")
     }
 
@@ -493,16 +1555,22 @@ final class TranslatorModel: ObservableObject {
     func translateClipboardURL() {
         let value = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         clipboardPreview = value
+        translateURL(value)
+    }
+
+    func translateURL(_ rawValue: String) {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        clipboardPreview = value
         guard let url = URL(string: value), let scheme = url.scheme, scheme.hasPrefix("http") else {
-            appendLog("error: clipboard does not contain an HTTP(S) URL")
+            appendLog("error: enter a valid HTTP(S) URL")
             return
         }
         let paperID = Self.paperID(from: url)
         let settings = runtimeSettings()
         startWorkflow(paperID: paperID, title: "URL 번역") { [weak self] in
             try await self?.runCommand(["fetch", "--paper-id", paperID, "--source-url", value, "--force", "--json"], settings: settings)
-            try Self.validateModelEndpoint(settings: settings)
-            try await self?.runCommand(["translate", "--paper-id", paperID, "--model", settings.model, "--json"], settings: settings)
+            try Self.validateTranslationProvider(settings: settings)
+            try await self?.runCommand(["translate", "--paper-id", paperID, "--provider", settings.provider.rawValue, "--model", settings.model, "--json"], settings: settings)
             try await self?.runCommand(["restyle", "--paper-id", paperID, "--json"], settings: settings)
         }
     }
@@ -547,8 +1615,8 @@ final class TranslatorModel: ObservableObject {
         let settings = runtimeSettings()
         startWorkflow(paperID: paperID, title: "PDF 번역") { [weak self] in
             try await self?.runCommand(["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--json"], settings: settings)
-            try Self.validateModelEndpoint(settings: settings)
-            try await self?.runCommand(["translate", "--paper-id", paperID, "--model", settings.model, "--json"], settings: settings)
+            try Self.validateTranslationProvider(settings: settings)
+            try await self?.runCommand(["translate", "--paper-id", paperID, "--provider", settings.provider.rawValue, "--model", settings.model, "--json"], settings: settings)
             try await self?.runCommand(["restyle", "--paper-id", paperID, "--json"], settings: settings)
         }
     }
@@ -560,6 +1628,58 @@ final class TranslatorModel: ObservableObject {
         }
     }
 
+    func checkConnection() {
+        if selectedProvider == .codex {
+            refreshCodexStatus()
+        } else {
+            runDoctor()
+        }
+    }
+
+    func refreshCodexStatus() {
+        guard !isRunning else { return }
+        codexAuthStatus = "확인 중…"
+        Task {
+            do {
+                let output = try await runCodexCLI(["login", "status"])
+                await MainActor.run {
+                    isCodexAuthenticated = output.localizedCaseInsensitiveContains("logged in using ChatGPT")
+                    codexAuthStatus = isCodexAuthenticated ? "ChatGPT에 로그인됨" : output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    appendLog(output.trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+            } catch {
+                await MainActor.run {
+                    isCodexAuthenticated = false
+                    codexAuthStatus = "Codex 로그인이 필요합니다"
+                    appendLog("error: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    func startCodexLogin() {
+        guard !isRunning else { return }
+        setRunning(true, status: "Codex 로그인 중")
+        codexAuthStatus = "브라우저에서 로그인을 완료해주세요"
+        appendLog("Codex managed ChatGPT OAuth login started")
+        Task {
+            do {
+                let output = try await runCodexCLI(["login"])
+                await MainActor.run {
+                    setRunning(false, status: "대기")
+                    appendLog(output.trimmingCharacters(in: .whitespacesAndNewlines))
+                    refreshCodexStatus()
+                }
+            } catch {
+                await MainActor.run {
+                    setRunning(false, status: "로그인 실패")
+                    codexAuthStatus = "Codex 로그인에 실패했습니다"
+                    appendLog("error: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
     func cancel() {
         currentProcess?.terminate()
         currentProcess = nil
@@ -568,18 +1688,21 @@ final class TranslatorModel: ObservableObject {
     }
 
     func openOutput(kind: OutputKind) {
-        guard !lastPaperID.isEmpty else { return }
+        guard let url = outputURL(kind: kind) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func outputURL(kind: OutputKind) -> URL? {
+        guard !lastPaperID.isEmpty else { return nil }
         let rememberedPath = kind == .korean ? lastKoreanOutput : lastBilingualOutput
-        let url: URL
         if !rememberedPath.isEmpty {
-            url = URL(fileURLWithPath: repoPath).appendingPathComponent(rememberedPath)
-        } else {
-            let suffix = kind == .korean ? ".ko.paper.html" : ".ko-en.paper.html"
-            url = URL(fileURLWithPath: repoPath)
+            return URL(fileURLWithPath: repoPath).appendingPathComponent(rememberedPath)
+        }
+        let suffix = kind == .korean ? ".ko.paper.html" : ".ko-en.paper.html"
+        let url = URL(fileURLWithPath: repoPath)
                 .appendingPathComponent("outputs")
                 .appendingPathComponent("\(lastPaperID)\(suffix)")
-        }
-        NSWorkspace.shared.open(url)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     func openOutputsFolder() {
@@ -592,7 +1715,8 @@ final class TranslatorModel: ObservableObject {
             repoPath: repoPath,
             baseURLOverride: baseURLOverride.trimmingCharacters(in: .whitespacesAndNewlines),
             apiKeyOverride: apiKeyOverride.trimmingCharacters(in: .whitespacesAndNewlines),
-            model: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            model: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            provider: selectedProvider
         )
     }
 
@@ -602,6 +1726,9 @@ final class TranslatorModel: ObservableObject {
         lastPaperID = paperID
         lastKoreanOutput = ""
         lastBilingualOutput = ""
+        progressCompleted = 0
+        progressTotal = 0
+        progressLabel = "준비 중"
         setRunning(true, status: "\(title) 실행 중")
         appendLog("paper_id=\(paperID.isEmpty ? "-" : paperID)")
         Task {
@@ -645,6 +1772,9 @@ final class TranslatorModel: ObservableObject {
                 }
                 if !settings.apiKeyOverride.isEmpty {
                     env["OPENAI_API_KEY"] = settings.apiKeyOverride
+                }
+                if let codex = Self.resolveCodexExecutable() {
+                    env["CODEX_EXECUTABLE"] = codex.path
                 }
                 process.environment = env
 
@@ -692,6 +1822,39 @@ final class TranslatorModel: ObservableObject {
         }
     }
 
+    private func runCodexCLI(_ arguments: [String]) async throws -> String {
+        guard let codex = Self.resolveCodexExecutable() else {
+            throw AppError.message("Codex CLI를 찾을 수 없습니다. Codex를 설치한 뒤 다시 시도해주세요.")
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = codex
+                process.arguments = arguments
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = pipe
+                DispatchQueue.main.async { self.currentProcess = process }
+                do {
+                    try process.run()
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    process.waitUntilExit()
+                    DispatchQueue.main.async {
+                        if self.currentProcess === process { self.currentProcess = nil }
+                    }
+                    let output = String(data: data, encoding: .utf8) ?? ""
+                    guard process.terminationStatus == 0 else {
+                        continuation.resume(throwing: AppError.message(output.isEmpty ? "Codex command failed" : output))
+                        return
+                    }
+                    continuation.resume(returning: output)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     private func captureOutputPaths(from text: String) {
         if let output = Self.lastRegexMatch(pattern: #""output"\s*:\s*"([^"]+\.ko\.paper\.html)""#, in: text) {
             lastKoreanOutput = output
@@ -708,6 +1871,7 @@ final class TranslatorModel: ObservableObject {
 
     private func appendLog(_ line: String) {
         guard !line.isEmpty else { return }
+        updateProgress(from: line)
         if logText.isEmpty {
             logText = line
         } else {
@@ -715,6 +1879,19 @@ final class TranslatorModel: ObservableObject {
         }
         if logText.count > 120_000 {
             logText.removeFirst(logText.count - 120_000)
+        }
+    }
+
+    private func updateProgress(from text: String) {
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = String(rawLine)
+            guard let marker = line.range(of: "completed batch ") else { continue }
+            let batchToken = line[marker.upperBound...].split(separator: " ").first ?? ""
+            let batchParts = batchToken.split(separator: "/")
+            guard batchParts.count == 2, let total = Int(batchParts[1]) else { continue }
+            progressTotal = total
+            progressCompleted = min(total, progressCompleted + 1)
+            progressLabel = "번역 청크 \(progressCompleted)/\(total)"
         }
     }
 
@@ -779,6 +1956,20 @@ final class TranslatorModel: ObservableObject {
         return nil
     }
 
+    private static func isLiteParseRepo(atPath path: String) -> Bool {
+        let root = URL(fileURLWithPath: path)
+        let script = root.appendingPathComponent("scripts/paper_translator.py")
+        let manifest = root.appendingPathComponent("pyproject.toml")
+        guard FileManager.default.isExecutableFile(atPath: root.appendingPathComponent("paper-translator").path),
+              FileManager.default.fileExists(atPath: script.path),
+              FileManager.default.fileExists(atPath: manifest.path) else {
+            return false
+        }
+        let scriptText = (try? String(contentsOf: script, encoding: .utf8)) ?? ""
+        let manifestText = (try? String(contentsOf: manifest, encoding: .utf8)) ?? ""
+        return scriptText.contains("load_liteparse") && manifestText.contains("liteparse")
+    }
+
     private static func resolveUVExecutable() -> URL? {
         let fileManager = FileManager.default
         var candidates = ProcessInfo.processInfo.environment["PATH", default: ""]
@@ -797,17 +1988,51 @@ final class TranslatorModel: ObservableObject {
         return nil
     }
 
+    private static func resolveCodexExecutable() -> URL? {
+        let fileManager = FileManager.default
+        var candidates = ProcessInfo.processInfo.environment["PATH", default: ""]
+            .split(separator: ":")
+            .map { URL(fileURLWithPath: String($0)).appendingPathComponent("codex") }
+        let home = fileManager.homeDirectoryForCurrentUser
+        let nodeVersions = home.appendingPathComponent(".nvm/versions/node")
+        if let versions = try? fileManager.contentsOfDirectory(
+            at: nodeVersions,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            candidates += versions
+                .sorted { $0.lastPathComponent > $1.lastPathComponent }
+                .map { $0.appendingPathComponent("bin/codex") }
+        }
+        candidates += [
+            home.appendingPathComponent(".local/bin/codex"),
+            URL(fileURLWithPath: "/opt/homebrew/bin/codex"),
+            URL(fileURLWithPath: "/usr/local/bin/codex")
+        ]
+        return candidates.first { fileManager.isExecutableFile(atPath: $0.path) }
+    }
+
+    private static func validateTranslationProvider(settings: RuntimeSettings) throws {
+        if settings.provider == .codex {
+            guard resolveCodexExecutable() != nil else {
+                throw AppError.message("Codex CLI를 찾을 수 없습니다. Codex를 설치하고 ChatGPT로 로그인해주세요.")
+            }
+            return
+        }
+        try validateModelEndpoint(settings: settings)
+    }
+
     private static func validateModelEndpoint(settings: RuntimeSettings) throws {
         let baseURL = effectiveBaseURL(settings: settings)
         guard !baseURL.isEmpty else {
-            throw AppError.message("Base URL이 비어 있습니다. 설정에 6번 서버 주소를 입력하거나 .env에 OPENAI_BASE_URL을 넣어주세요.")
+            throw AppError.message("OpenAI Base URL이 비어 있습니다. 설정에 주소를 입력하거나 .env에 OPENAI_BASE_URL을 넣어주세요.")
         }
         guard let url = URL(string: baseURL), let host = url.host else {
-            throw AppError.message("Base URL 형식이 올바르지 않습니다: \(baseURL)")
+            throw AppError.message("OpenAI Base URL 형식이 올바르지 않습니다: \(baseURL)")
         }
         let port = UInt16(url.port ?? (url.scheme == "https" ? 443 : 80))
         guard canReach(host: host, port: port, timeout: 2.0) else {
-            throw AppError.message("Base URL에 연결할 수 없습니다: \(baseURL)\n6번 서버를 쓰려면 설정 또는 .env의 OPENAI_BASE_URL을 http://121.126.210.6:8317/v1 로 맞춰주세요.")
+            throw AppError.message("OpenAI Base URL에 연결할 수 없습니다: \(baseURL)\n설정값 또는 .env의 OPENAI_BASE_URL을 확인해주세요.")
         }
     }
 

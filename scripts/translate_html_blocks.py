@@ -5,8 +5,12 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -815,6 +819,68 @@ def call_api(base_url: str, api_key: str, model: str, batch: list[tuple[str, str
     raise RuntimeError(f"request failed: {last}") from last
 
 
+def call_codex(model: str, batch: list[tuple[str, str]], timeout: int, retries: int) -> dict[str, str]:
+    codex = os.environ.get("CODEX_EXECUTABLE") or shutil.which("codex")
+    if not codex:
+        raise RuntimeError("codex CLI not found; install Codex and sign in with ChatGPT first")
+
+    schema_path = Path(__file__).with_name("codex_translation_schema.json")
+    prompt = "\n\n".join(
+        (
+            SYSTEM_PROMPT,
+            USER_PROMPT.format(
+                items_json=json.dumps([{"id": bid, "text": text} for bid, text in batch], ensure_ascii=False)
+            ),
+            "Return only data that matches the supplied JSON schema. Do not use tools or modify files.",
+        )
+    )
+    last: Exception | None = None
+    for attempt in range(retries + 1):
+        output_path = Path(tempfile.gettempdir()) / f"paper-translator-codex-{os.getpid()}-{time.time_ns()}.json"
+        command = [
+            codex,
+            "exec",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--color",
+            "never",
+            "--model",
+            model,
+            "--output-schema",
+            str(schema_path),
+            "--output-last-message",
+            str(output_path),
+            "-",
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                input=prompt,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+                cwd=tempfile.gettempdir(),
+            )
+            if completed.returncode != 0:
+                detail = completed.stderr.strip() or completed.stdout.strip() or f"exit {completed.returncode}"
+                raise RuntimeError(detail)
+            parsed = extract_json(output_path.read_text(encoding="utf-8"))
+            return {str(item["id"]): str(item["text"]) for item in parsed["translations"]}
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            if attempt >= retries:
+                break
+            time.sleep(2**attempt)
+        finally:
+            output_path.unlink(missing_ok=True)
+    raise RuntimeError(f"Codex request failed: {last}") from last
+
+
 def log_factory(path: Path | None):
     def log(message: str) -> None:
         stamped = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}"
@@ -991,11 +1057,13 @@ def main(argv: list[str]) -> None:
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--cache", required=True)
+    parser.add_argument("--provider", choices=("api", "codex"), default="api")
     parser.add_argument("--model", default="gpt-5.4-mini")
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--max-chars", type=int, default=5000)
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--max-retries", type=int, default=3)
+    parser.add_argument("--concurrency", type=int, default=10, help="maximum number of translation batches in flight")
     parser.add_argument("--progress-log", default="")
     parser.add_argument("--bilingual-output", default="", help="Optional HTML output with Korean and English tabs")
     parser.add_argument("--dry-run", action="store_true")
@@ -1034,28 +1102,46 @@ def main(argv: list[str]) -> None:
         log(f"dry_run=true chars_to_translate={sum(len(x[1]) for x in todo)}")
         return
 
-    api_key = os.environ.get("OPENAI_API_KEY")
-    base_url = os.environ.get("OPENAI_BASE_URL")
-    if not api_key or not base_url:
-        raise SystemExit("OPENAI_API_KEY and OPENAI_BASE_URL are required")
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    base_url = os.environ.get("OPENAI_BASE_URL", "")
+    if args.provider == "api" and (not api_key or not base_url):
+        raise SystemExit("OPENAI_API_KEY and OPENAI_BASE_URL are required for the api provider")
+    if args.provider == "codex" and not (os.environ.get("CODEX_EXECUTABLE") or shutil.which("codex")):
+        raise SystemExit("codex CLI is required for the codex provider")
 
     batches = make_batches(todo, args.max_chars)
-    for batch_no, batch in enumerate(batches, 1):
-        log(f"translating batch {batch_no}/{len(batches)} blocks={len(batch)} chars={sum(len(x[1]) for x in batch)}")
-        result = call_api(base_url, api_key, args.model, batch, args.timeout, args.max_retries)
+    concurrency = max(1, min(args.concurrency, 3 if args.provider == "codex" else args.concurrency))
+    log(f"translating {len(batches)} batches provider={args.provider} concurrency={concurrency}")
+
+    def translate_batch(batch: list[tuple[str, str]]) -> dict[str, str]:
+        if args.provider == "codex":
+            return call_codex(args.model, batch, args.timeout, args.max_retries)
+        return call_api(base_url, api_key, args.model, batch, args.timeout, args.max_retries)
+
+    def finalize_batch(batch_no: int, batch: list[tuple[str, str]], result: dict[str, str]) -> None:
         missing = [bid for bid, _ in batch if bid not in result]
         if missing:
             log(f"batch {batch_no} missing={len(missing)}; retrying one by one")
             for bid, html_fragment in batch:
                 if bid in result:
                     continue
-                single = call_api(base_url, api_key, args.model, [(bid, html_fragment)], args.timeout, args.max_retries)
+                single = translate_batch([(bid, html_fragment)])
                 result.update(single)
         for bid, source_masked in batch:
             ko_masked = result[bid]
             translations[bid] = ko_masked
             append_cache(cache_path, source_masked, ko_masked)
         log(f"completed batch {batch_no}/{len(batches)} translated={len(translations)}/{len(blocks)}")
+
+    with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="translate") as executor:
+        futures = {}
+        for batch_no, batch in enumerate(batches, 1):
+            log(f"queued batch {batch_no}/{len(batches)} blocks={len(batch)} chars={sum(len(x[1]) for x in batch)}")
+            future = executor.submit(translate_batch, batch)
+            futures[future] = (batch_no, batch)
+        for future in as_completed(futures):
+            batch_no, batch = futures[future]
+            finalize_batch(batch_no, batch, future.result())
 
     for bid, tag in id_to_tag.items():
         ko_masked = translations.get(bid)

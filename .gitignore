@@ -14,3 +14,6 @@ __pycache__/
 dist/
 macos-app/.build/
 macos-app/.swiftpm/
+.clang-module-cache/
+.swiftpm-cache/
+.uv-cache/

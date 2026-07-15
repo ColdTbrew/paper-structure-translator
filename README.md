@@ -2,13 +2,23 @@
 
 [English](README.md) | [한국어](README.ko.md)
 
-OpenAI-compatible pipeline for making clean Korean paper-viewer HTML from ar5iv HTML.
+Structure-preserving Korean paper translation with a native macOS workspace, ChatGPT/Codex subscription sign-in, and OpenAI-compatible API support.
 
 The goal is not to summarize a paper. The goal is to keep the paper readable like a normal article page while translating the body text as literally as possible.
 
 ## Preview
 
-The generated HTML is meant to feel like a quiet paper reader: figures and tables stay in place, citations remain clickable, and the translated body text is easy to read line by line.
+Import an arXiv/ar5iv link or drop a PDF into the native macOS app.
+
+![Paper Translator document import](docs/paper-translator-lingopaper-v2.png)
+
+The app keeps the full workflow in one place: document import, structure-preserving translation progress, and the final paper reader.
+
+| Translation progress | Built-in paper reader |
+| --- | --- |
+| ![Structure-preserving translation progress](docs/paper-translator-progress.png) | ![Paper Translator built-in reader](docs/paper-translator-reader.png) |
+
+The generated HTML is designed as a quiet paper reader: figures and tables stay in place, citations remain clickable, and the translated body text remains easy to read line by line.
 
 | Korean reader | English/Korean parallel reader |
 | --- | --- |
@@ -28,6 +38,9 @@ The bilingual output includes an `원본 보기` mode with English on the left a
 - Writes Korean-only HTML and bilingual English/Korean HTML.
 - Provides a two-column bilingual reader with optional scroll sync.
 - Writes JSONL caches so interrupted runs can resume.
+- Includes a native SwiftUI macOS workspace for link/PDF import, live progress, and reading outputs.
+- Supports ChatGPT/Codex subscription authentication without copying OAuth tokens into the app.
+- Keeps OpenAI-compatible API key and custom base URL support as a separate provider.
 
 ## Agent Ready
 
@@ -39,8 +52,39 @@ This repository includes instructions for coding agents. If you are using Codex,
 
 ## Setup
 
+Install the local runtime first:
+
 ```bash
 uv sync
+```
+
+Then choose one authentication method.
+
+### Option A: ChatGPT / Codex Subscription
+
+Install the Codex CLI, then sign in with ChatGPT from the app Settings screen or with:
+
+```bash
+codex login
+codex login status
+```
+
+The app delegates login, credential storage, and refresh to Codex. It does not read or persist the OAuth tokens itself. Select `ChatGPT / Codex subscription` in Settings, then choose a model.
+
+The same provider is available from the CLI:
+
+```bash
+./paper-translator translate \
+  --paper-id mmdocrag \
+  --provider codex \
+  --model gpt-5.4-mini
+```
+
+### Option B: OpenAI-Compatible API
+
+Create the local environment file:
+
+```bash
 cp .env.example .env
 ```
 
@@ -53,9 +97,11 @@ OPENAI_BASE_URL=http://host:port/v1
 
 `.env`, downloaded sources, caches, and generated HTML outputs are ignored by git.
 
+In the macOS app, select `OpenAI-compatible API` to edit the OpenAI Base URL, choose a model, or temporarily enter an API key. Leaving an override empty uses the corresponding `.env` value.
+
 ## Quick Start
 
-Check the local environment:
+For the OpenAI-compatible API provider, check the local environment:
 
 ```bash
 ./paper-translator doctor
@@ -83,7 +129,7 @@ Run a dry run to inspect block counts before calling the model:
   --dry-run
 ```
 
-Then run the translation:
+Then run the translation. The default provider is `api`; pass `--provider codex` to use the signed-in ChatGPT/Codex subscription instead.
 
 ```bash
 ./paper-translator translate --paper-id mmdocrag
@@ -101,9 +147,7 @@ outputs/mmdocrag.ko-en.paper.html
 
 ## macOS App
 
-This repo also includes a small SwiftUI wrapper app for local desktop use. The app is native SwiftUI for the macOS interface, while the translation engine runs the same `uv`-managed Python pipeline used by `./paper-translator`.
-
-![Paper Translator macOS app](docs/macos-app.png)
+This repo includes a native SwiftUI workspace for local desktop use. The interface and built-in reader are native macOS components, while translation runs through the same `uv`-managed Python pipeline used by `./paper-translator`.
 
 Prepare the app runtime with:
 
@@ -131,12 +175,21 @@ dist/Paper Translator.app
 
 In the app you can:
 
-- Drag and drop a local PDF. The app runs `pdf-import`, `translate`, then `restyle`.
-- Copy an arXiv/ar5iv HTML URL, then click `클립보드 URL 번역`. The app runs `fetch`, `translate`, then `restyle`.
-- Watch the CLI progress log live.
-- Open the Korean-only or English/Korean parallel HTML output.
+- Paste an arXiv/ar5iv link or drag and drop a local PDF.
+- Follow import, structure analysis, translation, and viewer styling as distinct progress steps.
+- Monitor preservation status for figures, tables, equations, and citations.
+- Read the Korean output or switch to the English/Korean comparison view.
+- Open the generated HTML or the two-column bilingual reader.
+- Choose between a ChatGPT/Codex subscription and an OpenAI-compatible API.
+- Select GPT-5.6 Sol, Terra, Luna, or another configured model.
 
-The app auto-detects this repository when launched from the repo, and you can edit the repo path in the Settings panel. Leave API key and base URL fields empty to use `.env`; fill them only when you want a temporary app-level override.
+The app auto-detects this repository when launched from the repo, and you can edit the project path in Settings.
+
+### Codex OAuth in Settings
+
+![ChatGPT and Codex subscription sign-in](docs/paper-translator-codex-oauth.png)
+
+`ChatGPT / Codex subscription` uses the locally installed Codex runtime. `ChatGPT로 로그인` opens the Codex-managed browser login, and `상태 확인` verifies the current account without exposing tokens to Paper Translator. The implementation follows the managed authentication boundary documented by the [Codex app-server protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md).
 
 ## Translate Another Paper
 
@@ -205,6 +258,7 @@ If you already have translated HTML and only want to refresh the viewer CSS or r
 - `paper-translator`: CLI wrapper that runs `scripts/paper_translator.py` through `uv`.
 - `scripts/paper_translator.py`: agent-aware CLI for `doctor`, `fetch`, `translate`, `restyle`, and `serve`.
 - `scripts/translate_html_blocks.py`: masks tags, translates text blocks, restores tags, writes paper-viewer HTML.
+- `scripts/codex_translation_schema.json`: constrains Codex subscription translation batches to deterministic `{id, text}` JSON output.
 - `scripts/apply_paper_viewer_style.py`: reapplies viewer CSS, fixes ar5iv asset links, optionally restores original table HTML.
 - `scripts/bootstrap_python_env.sh`: creates `.venv` without `uv` and installs runtime Python dependencies.
 - `scripts/build_macos_app.sh`: builds the SwiftUI desktop wrapper into `dist/Paper Translator.app`.

@@ -464,6 +464,8 @@ def command_translate(args: argparse.Namespace) -> None:
         str(paths["cache"]),
         "--progress-log",
         str(paths["progress_log"]),
+        "--provider",
+        args.provider,
         "--model",
         args.model,
         "--env-file",
@@ -474,6 +476,8 @@ def command_translate(args: argparse.Namespace) -> None:
         str(args.timeout),
         "--max-retries",
         str(args.max_retries),
+        "--concurrency",
+        str(args.concurrency),
     ]
     if args.dry_run:
         translated_args.append("--dry-run")
@@ -649,11 +653,13 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--force", action="store_true", help="overwrite existing fetched source when --source-url is used")
     translate.add_argument("--cache", default="")
     translate.add_argument("--progress-log", default="")
+    translate.add_argument("--provider", choices=("api", "codex"), default="api")
     translate.add_argument("--model", default=DEFAULT_MODEL)
     translate.add_argument("--env-file", default=".env")
     translate.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
     translate.add_argument("--timeout", type=int, default=180)
     translate.add_argument("--max-retries", type=int, default=3)
+    translate.add_argument("--concurrency", type=int, default=10)
     translate.add_argument("--dry-run", action="store_true")
     translate.set_defaults(func=command_translate)
 
