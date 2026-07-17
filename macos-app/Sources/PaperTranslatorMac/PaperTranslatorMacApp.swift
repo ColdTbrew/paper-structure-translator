@@ -34,6 +34,7 @@ private enum ImportMode: String, CaseIterable, Identifiable {
 private enum SidebarDestination {
     case translation
     case recent
+    case documents
     case settings
 }
 
@@ -48,6 +49,9 @@ struct WorkspaceView: View {
     @State private var isFileImporterPresented = false
     @State private var readerScrollTarget: String?
     @State private var loadedReaderHeadings: [ReaderHeading] = []
+    @State private var outputDocuments: [OutputDocument] = []
+    @State private var documentSearchText = ""
+    @State private var documentLoadError: String?
     private let readerPreviewEnabled: Bool
 
     init() {
@@ -82,7 +86,13 @@ struct WorkspaceView: View {
         }
         .onChange(of: model.statusText) { status in
             if status == "완료", !model.lastPaperID.isEmpty {
+                reloadOutputDocuments()
                 stage = .reader
+            }
+        }
+        .onChange(of: model.repoPath) { _ in
+            if destination == .documents {
+                reloadOutputDocuments()
             }
         }
         .animation(reduceMotion ? .linear(duration: 0.12) : .spring(response: 0.34, dampingFraction: 0.92), value: stage)
@@ -99,8 +109,9 @@ struct WorkspaceView: View {
             SidebarButton(title: "최근 문서", icon: "clock", isSelected: destination == .recent) {
                 destination = .recent
             }
-            SidebarButton(title: "내 문서", icon: "doc", isSelected: false) {
-                model.openOutputsFolder()
+            SidebarButton(title: "내 문서", icon: "doc", isSelected: destination == .documents) {
+                destination = .documents
+                reloadOutputDocuments()
             }
             SidebarButton(title: "설정", icon: "gearshape", isSelected: destination == .settings) {
                 destination = .settings
@@ -139,6 +150,8 @@ struct WorkspaceView: View {
             }
         case .recent:
             recentScreen
+        case .documents:
+            documentsScreen
         case .settings:
             settingsScreen
         }
@@ -447,6 +460,117 @@ struct WorkspaceView: View {
         .padding(.vertical, 34)
     }
 
+    private var documentsScreen: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top, spacing: 16) {
+                screenHeader(
+                    step: nil,
+                    title: "내 문서",
+                    subtitle: "번역된 문서를 앱 안에서 찾아보고 읽을 수 있습니다."
+                )
+                Spacer()
+                Button {
+                    reloadOutputDocuments()
+                } label: {
+                    Label("새로고침", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(WorkspaceSecondaryButtonStyle())
+                .help("문서 목록 새로고침")
+            }
+
+            if let documentLoadError {
+                VStack(spacing: 14) {
+                    EmptyDocumentView(
+                        title: "문서 폴더를 읽을 수 없습니다",
+                        subtitle: documentLoadError
+                    )
+                    Button("다시 시도") { reloadOutputDocuments() }
+                        .buttonStyle(WorkspacePrimaryButtonStyle(compact: true))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if outputDocuments.isEmpty {
+                EmptyDocumentView(
+                    title: "저장된 문서가 없습니다",
+                    subtitle: "번역이 완료되면 이곳에 문서가 표시됩니다."
+                )
+            } else if filteredOutputDocuments.isEmpty {
+                EmptyDocumentView(
+                    title: "검색 결과가 없습니다",
+                    subtitle: "다른 문서 이름이나 형식을 검색해 보세요."
+                )
+            } else {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("문서 \(filteredOutputDocuments.count)개")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(WorkspacePalette.secondaryText)
+                        Spacer()
+                        Text("최근 수정 순")
+                            .font(.system(size: 11))
+                            .foregroundStyle(WorkspacePalette.tertiaryText)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(height: 38)
+
+                    Divider()
+
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(filteredOutputDocuments) { document in
+                                Button {
+                                    openOutputDocument(document)
+                                } label: {
+                                    OutputDocumentRow(document: document)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityHint("앱 내 리더에서 엽니다")
+
+                                if document.id != filteredOutputDocuments.last?.id {
+                                    Divider().padding(.leading, 70)
+                                }
+                            }
+                        }
+                    }
+                }
+                .background(WorkspacePalette.panel)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(WorkspacePalette.border))
+            }
+        }
+        .padding(.horizontal, 42)
+        .padding(.vertical, 34)
+        .searchable(text: $documentSearchText, placement: .toolbar, prompt: "문서 검색")
+        .onAppear(perform: reloadOutputDocuments)
+    }
+
+    private var filteredOutputDocuments: [OutputDocument] {
+        let query = documentSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return outputDocuments }
+        return outputDocuments.filter {
+            $0.fileName.localizedCaseInsensitiveContains(query)
+                || $0.paperID.localizedCaseInsensitiveContains(query)
+                || $0.formatLabel.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func reloadOutputDocuments() {
+        do {
+            outputDocuments = try model.loadOutputDocuments()
+            documentLoadError = nil
+        } catch {
+            outputDocuments = []
+            documentLoadError = error.localizedDescription
+        }
+    }
+
+    private func openOutputDocument(_ document: OutputDocument) {
+        model.selectOutputDocument(document)
+        loadedReaderHeadings = []
+        readerScrollTarget = nil
+        destination = .translation
+        stage = .reader
+    }
+
     private var settingsScreen: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -498,6 +622,16 @@ struct WorkspaceView: View {
                             }
                         }
                         .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Divider().padding(.leading, 18)
+                    SettingRow(title: "PDF 레이아웃") {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Toggle("표·차트·그림을 본문 위치에 삽입", isOn: $model.useAdvancedPDFLayout)
+                            Text("sahilchachra/unlimited-ocr-mxfp8-mlx · Apple Silicon 로컬 처리")
+                                .font(.system(size: 11))
+                                .foregroundStyle(WorkspacePalette.secondaryText)
+                        }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if model.selectedProvider == .api {
@@ -565,7 +699,7 @@ struct WorkspaceView: View {
                 .appendingPathComponent("outputs/mmdocrag.ko.paper.html")
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
         }
-        return model.outputURL(kind: .korean)
+        return model.readerOutputURL()
     }
 
 }
@@ -606,6 +740,54 @@ private struct ImportModeSelector: View {
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspacePalette.border))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("가져오기 방식")
+    }
+}
+
+private struct OutputDocumentRow: View {
+    let document: OutputDocument
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(WorkspacePalette.blue.opacity(0.08))
+                Image(systemName: document.isBilingual ? "rectangle.split.2x1" : "doc.richtext")
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(WorkspacePalette.blue)
+            }
+            .frame(width: 42, height: 48)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(document.paperID)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                HStack(spacing: 7) {
+                    Text(document.formatLabel)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(WorkspacePalette.blue)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(WorkspacePalette.blue.opacity(0.08))
+                        .clipShape(Capsule())
+                    Text(document.modifiedAt, format: .dateTime.year().month().day())
+                    Text(document.byteCountLabel)
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(WorkspacePalette.secondaryText)
+            }
+
+            Spacer(minLength: 12)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(WorkspacePalette.tertiaryText)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
     }
 }
 
@@ -907,7 +1089,11 @@ private struct PaperWebPreview: NSViewRepresentable {
 
     func updateNSView(_ view: WKWebView, context: Context) {
         if view.url != url {
-            view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+            // Generated readers live in outputs/ while PDF page and layout crops
+            // live in the sibling inputs/assets/ tree. WKWebView blocks those
+            // images unless the repository root is included in its read scope.
+            let repositoryRoot = url.deletingLastPathComponent().deletingLastPathComponent()
+            view.loadFileURL(url, allowingReadAccessTo: repositoryRoot)
         }
         guard let scrollTarget, context.coordinator.lastScrollTarget != scrollTarget else { return }
         context.coordinator.lastScrollTarget = scrollTarget
@@ -1457,6 +1643,19 @@ enum OutputKind {
     case bilingual
 }
 
+struct OutputDocument: Identifiable {
+    let url: URL
+    let paperID: String
+    let modifiedAt: Date
+    let byteCount: Int64
+    let isBilingual: Bool
+
+    var id: String { url.path }
+    var fileName: String { url.lastPathComponent }
+    var formatLabel: String { isBilingual ? "한영 비교" : "한국어" }
+    var byteCountLabel: String { ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file) }
+}
+
 enum TranslationProvider: String, CaseIterable, Identifiable {
     case codex
     case api
@@ -1477,6 +1676,7 @@ struct RuntimeSettings {
     let apiKeyOverride: String
     let model: String
     let provider: TranslationProvider
+    let useAdvancedPDFLayout: Bool
 }
 
 struct ModelOption {
@@ -1501,6 +1701,7 @@ final class TranslatorModel: ObservableObject {
     @Published var apiKeyOverride = ""
     @Published var selectedModel: String
     @Published var selectedProvider: TranslationProvider
+    @Published var useAdvancedPDFLayout: Bool
     @Published var codexAuthStatus = "상태를 확인해주세요"
     @Published var isCodexAuthenticated = false
     @Published var clipboardPreview = ""
@@ -1509,6 +1710,7 @@ final class TranslatorModel: ObservableObject {
     @Published var lastPaperID = ""
     @Published var lastKoreanOutput = ""
     @Published var lastBilingualOutput = ""
+    @Published var selectedReaderOutput = ""
     @Published var isRunning = false
     @Published var progressCompleted = 0
     @Published var progressTotal = 0
@@ -1535,6 +1737,7 @@ final class TranslatorModel: ObservableObject {
         let storedModel = defaults.string(forKey: "selectedModel") ?? Self.defaultModel
         selectedModel = Self.modelOptions.contains { $0.id == storedModel } ? storedModel : Self.defaultModel
         selectedProvider = TranslationProvider(rawValue: defaults.string(forKey: "selectedProvider") ?? "") ?? .api
+        useAdvancedPDFLayout = defaults.object(forKey: "useAdvancedPDFLayout") as? Bool ?? true
         if selectedProvider == .codex {
             DispatchQueue.main.async { [weak self] in self?.refreshCodexStatus() }
         }
@@ -1545,6 +1748,7 @@ final class TranslatorModel: ObservableObject {
         defaults.set(baseURLOverride, forKey: "baseURLOverride")
         defaults.set(selectedModel, forKey: "selectedModel")
         defaults.set(selectedProvider.rawValue, forKey: "selectedProvider")
+        defaults.set(useAdvancedPDFLayout, forKey: "useAdvancedPDFLayout")
         appendLog("settings saved")
     }
 
@@ -1614,7 +1818,16 @@ final class TranslatorModel: ObservableObject {
         let title = url.deletingPathExtension().lastPathComponent
         let settings = runtimeSettings()
         startWorkflow(paperID: paperID, title: "PDF 번역") { [weak self] in
-            try await self?.runCommand(["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--json"], settings: settings)
+            var importArguments = ["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--json"]
+            if settings.useAdvancedPDFLayout {
+                importArguments += [
+                    "--layout-backend", "unlimited-ocr-mlx",
+                    "--layout-model", "sahilchachra/unlimited-ocr-mxfp8-mlx"
+                ]
+            } else {
+                importArguments += ["--layout-backend", "liteparse"]
+            }
+            try await self?.runCommand(importArguments, settings: settings)
             try Self.validateTranslationProvider(settings: settings)
             try await self?.runCommand(["translate", "--paper-id", paperID, "--provider", settings.provider.rawValue, "--model", settings.model, "--json"], settings: settings)
             try await self?.runCommand(["restyle", "--paper-id", paperID, "--json"], settings: settings)
@@ -1705,8 +1918,83 @@ final class TranslatorModel: ObservableObject {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    func readerOutputURL() -> URL? {
+        if !selectedReaderOutput.isEmpty {
+            let selectedURL = URL(fileURLWithPath: repoPath).appendingPathComponent(selectedReaderOutput)
+            if FileManager.default.fileExists(atPath: selectedURL.path) {
+                return selectedURL
+            }
+        }
+        return outputURL(kind: .korean)
+    }
+
+    func loadOutputDocuments() throws -> [OutputDocument] {
+        let outputFolder = URL(fileURLWithPath: repoPath).appendingPathComponent("outputs", isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: outputFolder.path, isDirectory: &isDirectory) else {
+            return []
+        }
+        guard isDirectory.boolValue else {
+            throw AppError.message("outputs 경로가 폴더가 아닙니다: \(outputFolder.path)")
+        }
+
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey]
+        return try FileManager.default.contentsOfDirectory(
+            at: outputFolder,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        )
+        .compactMap { url -> OutputDocument? in
+            let fileName = url.lastPathComponent
+            let bilingualSuffix = ".ko-en.paper.html"
+            let koreanSuffix = ".ko.paper.html"
+            let isBilingual: Bool
+            let paperID: String
+
+            if fileName.hasSuffix(bilingualSuffix) {
+                isBilingual = true
+                paperID = String(fileName.dropLast(bilingualSuffix.count))
+            } else if fileName.hasSuffix(koreanSuffix) {
+                isBilingual = false
+                paperID = String(fileName.dropLast(koreanSuffix.count))
+            } else {
+                return nil
+            }
+
+            guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true else {
+                return nil
+            }
+            return OutputDocument(
+                url: url,
+                paperID: paperID,
+                modifiedAt: values.contentModificationDate ?? .distantPast,
+                byteCount: Int64(values.fileSize ?? 0),
+                isBilingual: isBilingual
+            )
+        }
+        .sorted {
+            if $0.modifiedAt == $1.modifiedAt {
+                return $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending
+            }
+            return $0.modifiedAt > $1.modifiedAt
+        }
+    }
+
+    func selectOutputDocument(_ document: OutputDocument) {
+        lastPaperID = document.paperID
+        selectedReaderOutput = "outputs/\(document.fileName)"
+
+        let outputFolder = URL(fileURLWithPath: repoPath).appendingPathComponent("outputs", isDirectory: true)
+        let koreanName = "\(document.paperID).ko.paper.html"
+        let bilingualName = "\(document.paperID).ko-en.paper.html"
+        let koreanURL = outputFolder.appendingPathComponent(koreanName)
+        let bilingualURL = outputFolder.appendingPathComponent(bilingualName)
+        lastKoreanOutput = FileManager.default.fileExists(atPath: koreanURL.path) ? "outputs/\(koreanName)" : ""
+        lastBilingualOutput = FileManager.default.fileExists(atPath: bilingualURL.path) ? "outputs/\(bilingualName)" : ""
+    }
+
     func openOutputsFolder() {
-        let url = URL(fileURLWithPath: repoPath).appendingPathComponent("outputs")
+        let url = URL(fileURLWithPath: repoPath).appendingPathComponent("outputs", isDirectory: true)
         NSWorkspace.shared.open(url)
     }
 
@@ -1716,7 +2004,8 @@ final class TranslatorModel: ObservableObject {
             baseURLOverride: baseURLOverride.trimmingCharacters(in: .whitespacesAndNewlines),
             apiKeyOverride: apiKeyOverride.trimmingCharacters(in: .whitespacesAndNewlines),
             model: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines),
-            provider: selectedProvider
+            provider: selectedProvider,
+            useAdvancedPDFLayout: useAdvancedPDFLayout
         )
     }
 
@@ -1726,6 +2015,7 @@ final class TranslatorModel: ObservableObject {
         lastPaperID = paperID
         lastKoreanOutput = ""
         lastBilingualOutput = ""
+        selectedReaderOutput = ""
         progressCompleted = 0
         progressTotal = 0
         progressLabel = "준비 중"

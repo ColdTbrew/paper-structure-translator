@@ -29,7 +29,7 @@
 ## 주요 기능
 
 - PDF 파싱 대신 ar5iv HTML을 사용합니다.
-- PDF만 있는 논문은 LiteParse 기반 `pdf-import`로 페이지 이미지와 텍스트 블록을 가진 source HTML로 먼저 변환할 수 있습니다.
+- PDF만 있는 논문은 Unlimited-OCR MXFP8 grounding으로 읽기 순서와 bbox를 추출하고 표·차트·그림 crop을 본문 사이에 넣은 source HTML로 변환합니다.
 - 모델 호출 전에 HTML 태그를 마스킹하고, 번역 후 같은 태그를 복원합니다.
 - 번역 가능한 텍스트 블록만 모델에 보냅니다.
 - `figure.ltx_table` 표 HTML은 모델에 보내지 않고 원본 그대로 유지해 토큰을 절약하고 표 깨짐을 줄입니다.
@@ -206,10 +206,10 @@ dist/Paper Translator.app
 
 ## PDF만 있는 논문
 
-ar5iv HTML이 없고 PDF만 있는 문서는 먼저 PDF를 source HTML로 가져옵니다. PDF 가져오기는 Python `liteparse` 패키지가 필요합니다.
+ar5iv HTML이 없고 PDF만 있는 문서는 먼저 PDF를 source HTML로 가져옵니다. Apple Silicon에서는 기본 레이아웃 백엔드가 `sahilchachra/unlimited-ocr-mxfp8-mlx`를 페이지별로 실행해 읽기 순서와 블록 bbox를 복원합니다.
 
 ```bash
-uv add liteparse
+uv sync
 ```
 
 에이전트에서 LiteParse skill 지침도 쓰려면 다음 명령으로 추가할 수 있습니다.
@@ -243,7 +243,20 @@ inputs/deepseek-v4.source.html
 ./paper-translator translate --paper-id deepseek-v4
 ```
 
-PDF 경로는 ar5iv HTML보다 구조 복원력이 낮습니다. 대신 LiteParse로 원본 페이지 스크린샷을 함께 보존하므로 그림, 수식, 표는 페이지 이미지에서 확인하고, 추출된 텍스트 블록을 번역하는 방식으로 읽을 수 있습니다.
+레이아웃 백엔드는 모델이 반환한 읽기 순서로 텍스트를 재배치하고, 감지한 표·차트·그림을 원본 페이지에서 잘라 앞뒤 본문 블록 사이에 삽입합니다. 검증용 원본 페이지 스크린샷도 `inputs/assets/`에 그대로 보존합니다.
+
+모델을 명시하려면 다음처럼 실행합니다.
+
+```bash
+uv sync
+./paper-translator pdf-import \
+  --paper-id scanned-paper \
+  --pdf scan.pdf \
+  --layout-backend unlimited-ocr-mlx \
+  --layout-model sahilchachra/unlimited-ocr-mxfp8-mlx
+```
+
+텍스트 PDF에서 빠른 PyMuPDF 기하 분석을 원하면 `--layout-backend native`, 기존처럼 페이지 전체 이미지를 우선하려면 `--layout-backend liteparse`를 사용합니다.
 
 ## 리더 스타일 재적용 또는 표 복원
 

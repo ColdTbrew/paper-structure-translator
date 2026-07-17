@@ -16,7 +16,7 @@ The output is not a summary. It is a faithful Korean translation in a clean pape
 
 The pipeline should:
 
-- Prefer ar5iv HTML as the source. If only a PDF is available, use `pdf-import` to create image-backed source HTML first.
+- Prefer ar5iv HTML as the source. If only a PDF is available, use `pdf-import` to create layout-grounded source HTML with inline table, chart, and figure crops.
 - Preserve document structure, links, citations, figures, equations, and code/pre/math blocks.
 - Translate normal text blocks as literally as possible.
 - Keep `figure.ltx_table` HTML unchanged and restore tables from source HTML.
@@ -72,17 +72,19 @@ Fetch source HTML with explicit flags:
   --json
 ```
 
-For PDF-only papers, first import the PDF. This requires the Python `liteparse` package; if missing, install it with `uv add liteparse`. Agents may also add the LiteParse skill instructions with `npx skills add run-llama/llamaparse-agent-skills --skill liteparse`.
+For PDF-only papers, first import the PDF. `uv sync` installs LiteParse, MLX-VLM, Pillow, and PyMuPDF. Agents may also add the LiteParse skill instructions with `npx skills add run-llama/llamaparse-agent-skills --skill liteparse`.
 
 ```bash
 ./paper-translator pdf-import \
   --paper-id deepseek-v4 \
   --pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf \
   --title "DeepSeek V4" \
+  --layout-backend unlimited-ocr-mlx \
+  --layout-model sahilchachra/unlimited-ocr-mxfp8-mlx \
   --json
 ```
 
-The command normalizes Hugging Face `/blob/...` URLs to `/resolve/...`, stores the PDF under `inputs/pdfs/`, renders page PNGs under `inputs/assets/<paper-id>/` with LiteParse, and writes `inputs/<paper-id>.source.html`.
+The command normalizes Hugging Face `/blob/...` URLs to `/resolve/...`, stores the PDF under `inputs/pdfs/`, renders page PNGs with LiteParse, runs the MLX model page by page for reading order and grounded boxes, writes inline visual crops under `inputs/assets/<paper-id>/layout/`, and writes `inputs/<paper-id>.source.html`.
 
 Dry run before calling the model:
 

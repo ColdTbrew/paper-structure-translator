@@ -29,7 +29,7 @@ The bilingual output includes an `원본 보기` mode with English on the left a
 ## Features
 
 - Uses ar5iv HTML instead of PDF parsing.
-- Converts PDF-only papers into image-backed source HTML with LiteParse-backed `pdf-import`.
+- Converts PDF-only papers into reading-order HTML with inline table, chart, and figure crops using Unlimited-OCR MXFP8 grounding.
 - Masks HTML tags before calling the model, then restores the exact tags after translation.
 - Sends only translatable text blocks to the model.
 - Keeps `figure.ltx_table` table HTML unchanged to save tokens and avoid breaking tables.
@@ -206,10 +206,10 @@ Remove `--dry-run` when the block count looks right.
 
 ## PDF-Only Papers
 
-If a paper has no ar5iv HTML and only ships as a PDF, import the PDF into source HTML first. PDF import requires the Python `liteparse` package.
+If a paper has no ar5iv HTML and only ships as a PDF, import the PDF into source HTML first. On Apple Silicon, the default layout backend uses `sahilchachra/unlimited-ocr-mxfp8-mlx` page by page to recover reading order and grounded block boxes.
 
 ```bash
-uv add liteparse
+uv sync
 ```
 
 Agents can also add the LiteParse skill instructions with:
@@ -243,7 +243,20 @@ Then use the normal translation command:
 ./paper-translator translate --paper-id deepseek-v4
 ```
 
-The PDF path is less structurally rich than ar5iv HTML. It uses LiteParse to preserve original page screenshots for figures, equations, and tables, while translated text comes from extracted PDF text blocks.
+The layout backend reflows text in model reading order and crops detected tables, charts, and figures from the original page between surrounding text blocks. It also keeps page screenshots under `inputs/assets/` as a source-of-truth fallback.
+
+To select the model explicitly:
+
+```bash
+uv sync
+./paper-translator pdf-import \
+  --paper-id scanned-paper \
+  --pdf scan.pdf \
+  --layout-backend unlimited-ocr-mlx \
+  --layout-model sahilchachra/unlimited-ocr-mxfp8-mlx
+```
+
+Use `--layout-backend native` for fast PyMuPDF geometry on born-digital PDFs, or `--layout-backend liteparse` for the old full-page-image fallback.
 
 ## Re-apply Viewer Style or Restore Tables
 

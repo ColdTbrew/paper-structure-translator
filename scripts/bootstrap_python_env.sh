@@ -23,7 +23,14 @@ if [ ! -x ".venv/bin/python" ]; then
   "$PYTHON_BIN" -m venv .venv
 fi
 
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install beautifulsoup4 liteparse lxml requests
+if .venv/bin/python -m pip --version >/dev/null 2>&1; then
+  .venv/bin/python -m pip install --upgrade pip
+  .venv/bin/python -m pip install beautifulsoup4 liteparse lxml mlx-vlm pillow pymupdf requests
+elif command -v uv >/dev/null 2>&1; then
+  uv pip install --python .venv/bin/python beautifulsoup4 liteparse lxml mlx-vlm pillow pymupdf requests
+else
+  echo "pip is unavailable in .venv and uv was not found" >&2
+  exit 1
+fi
 
 .venv/bin/python scripts/paper_translator.py doctor --json
