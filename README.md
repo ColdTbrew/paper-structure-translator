@@ -1,8 +1,8 @@
-# Structure-Preserving Paper Translator
+# KPaper
 
 [English](README.md) | [한국어](README.ko.md)
 
-Structure-preserving Korean paper translation with a native macOS workspace, ChatGPT/Codex subscription sign-in, and OpenAI-compatible API support.
+Read papers in Korean without losing their original structure. KPaper includes a native macOS workspace, ChatGPT/Codex subscription sign-in, and OpenAI-compatible API support.
 
 The goal is not to summarize a paper. The goal is to keep the paper readable like a normal article page while translating the body text as literally as possible.
 
@@ -10,13 +10,13 @@ The goal is not to summarize a paper. The goal is to keep the paper readable lik
 
 Import an arXiv/ar5iv link or drop a PDF into the native macOS app.
 
-![Paper Translator document import](docs/paper-translator-lingopaper-v2.png)
+![KPaper document import](docs/kpaper-lingopaper-v2.png)
 
 The app keeps the full workflow in one place: document import, structure-preserving translation progress, and the final paper reader.
 
 | Translation progress | Built-in paper reader |
 | --- | --- |
-| ![Structure-preserving translation progress](docs/paper-translator-progress.png) | ![Paper Translator built-in reader](docs/paper-translator-reader.png) |
+| ![Structure-preserving translation progress](docs/kpaper-progress.png) | ![KPaper built-in reader](docs/kpaper-reader.png) |
 
 The generated HTML is designed as a quiet paper reader: figures and tables stay in place, citations remain clickable, and the translated body text remains easy to read line by line.
 
@@ -48,7 +48,7 @@ This repository includes instructions for coding agents. If you are using Codex,
 
 - `AGENTS.md` for the full agent operating guide.
 - `CLAUDE.md` for Claude Code-specific defaults.
-- `skills/paper-structure-translator/SKILL.md` for reusable skill-style instructions.
+- `skills/kpaper/SKILL.md` for reusable skill-style instructions.
 
 ## Setup
 
@@ -74,7 +74,7 @@ The app delegates login, credential storage, and refresh to Codex. It does not r
 The same provider is available from the CLI:
 
 ```bash
-./paper-translator translate \
+./kpaper translate \
   --paper-id mmdocrag \
   --provider codex \
   --model gpt-5.4-mini
@@ -104,13 +104,13 @@ In the macOS app, select `OpenAI-compatible API` to edit the OpenAI Base URL, ch
 For the OpenAI-compatible API provider, check the local environment:
 
 ```bash
-./paper-translator doctor
+./kpaper doctor
 ```
 
 Fetch source HTML with explicit CLI flags:
 
 ```bash
-./paper-translator fetch \
+./kpaper fetch \
   --paper-id mmdocrag \
   --source-url https://ar5iv.labs.arxiv.org/html/2505.16470v2
 ```
@@ -118,13 +118,13 @@ Fetch source HTML with explicit CLI flags:
 Agent-friendly JSON output is available on every command:
 
 ```bash
-./paper-translator doctor --json
+./kpaper doctor --json
 ```
 
 Run a dry run to inspect block counts before calling the model:
 
 ```bash
-./paper-translator translate \
+./kpaper translate \
   --paper-id mmdocrag \
   --dry-run
 ```
@@ -132,7 +132,7 @@ Run a dry run to inspect block counts before calling the model:
 Then run the translation. The default provider is `api`; pass `--provider codex` to use the signed-in ChatGPT/Codex subscription instead.
 
 ```bash
-./paper-translator translate --paper-id mmdocrag
+./kpaper translate --paper-id mmdocrag
 ```
 
 The output files are:
@@ -147,7 +147,7 @@ outputs/mmdocrag.ko-en.paper.html
 
 ## macOS App
 
-This repo includes a native SwiftUI workspace for local desktop use. The interface and built-in reader are native macOS components, while translation runs through the same `uv`-managed Python pipeline used by `./paper-translator`.
+This repo includes a native SwiftUI workspace for local desktop use. The interface and built-in reader are native macOS components, while translation runs through the same `uv`-managed Python pipeline used by `./kpaper`.
 
 Prepare the app runtime with:
 
@@ -170,7 +170,7 @@ Build the app bundle:
 The bundle is written to:
 
 ```text
-dist/Paper Translator.app
+dist/KPaper.app
 ```
 
 In the app you can:
@@ -187,16 +187,16 @@ The app auto-detects this repository when launched from the repo, and you can ed
 
 ### Codex OAuth in Settings
 
-![ChatGPT and Codex subscription sign-in](docs/paper-translator-codex-oauth.png)
+![ChatGPT and Codex subscription sign-in](docs/kpaper-codex-oauth.png)
 
-`ChatGPT / Codex subscription` uses the locally installed Codex runtime. `ChatGPT로 로그인` opens the Codex-managed browser login, and `상태 확인` verifies the current account without exposing tokens to Paper Translator. The implementation follows the managed authentication boundary documented by the [Codex app-server protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md).
+`ChatGPT / Codex subscription` uses the locally installed Codex runtime. `ChatGPT로 로그인` opens the Codex-managed browser login, and `상태 확인` verifies the current account without exposing tokens to KPaper. The implementation follows the managed authentication boundary documented by the [Codex app-server protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md).
 
 ## Translate Another Paper
 
 Pass a new ar5iv URL directly to the CLI. It will derive the default input, output, cache, and bilingual output paths from `--paper-id`.
 
 ```bash
-./paper-translator translate \
+./kpaper translate \
   --paper-id your-paper \
   --source-url https://ar5iv.labs.arxiv.org/html/... \
   --dry-run
@@ -221,7 +221,7 @@ npx skills add run-llama/llamaparse-agent-skills --skill liteparse
 Hugging Face `/blob/...` PDF URLs are normalized to the raw `/resolve/...` PDF URL automatically.
 
 ```bash
-./paper-translator pdf-import \
+./kpaper pdf-import \
   --paper-id deepseek-v4 \
   --pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf \
   --title "DeepSeek V4" \
@@ -239,8 +239,8 @@ inputs/deepseek-v4.source.html
 Then use the normal translation command:
 
 ```bash
-./paper-translator translate --paper-id deepseek-v4 --dry-run
-./paper-translator translate --paper-id deepseek-v4
+./kpaper translate --paper-id deepseek-v4 --dry-run
+./kpaper translate --paper-id deepseek-v4
 ```
 
 The layout backend reflows text in model reading order and crops detected tables, charts, and figures from the original page between surrounding text blocks. It also keeps page screenshots under `inputs/assets/` as a source-of-truth fallback.
@@ -249,7 +249,7 @@ To select the model explicitly:
 
 ```bash
 uv sync
-./paper-translator pdf-import \
+./kpaper pdf-import \
   --paper-id scanned-paper \
   --pdf scan.pdf \
   --layout-backend unlimited-ocr-mlx \
@@ -263,18 +263,18 @@ Use `--layout-backend native` for fast PyMuPDF geometry on born-digital PDFs, or
 If you already have translated HTML and only want to refresh the viewer CSS or restore source tables:
 
 ```bash
-./paper-translator restyle --paper-id mmdocrag
+./kpaper restyle --paper-id mmdocrag
 ```
 
 ## Scripts
 
-- `paper-translator`: CLI wrapper that runs `scripts/paper_translator.py` through `uv`.
-- `scripts/paper_translator.py`: agent-aware CLI for `doctor`, `fetch`, `translate`, `restyle`, and `serve`.
+- `kpaper`: CLI wrapper that runs `scripts/kpaper.py` through `uv`.
+- `scripts/kpaper.py`: agent-aware CLI for `doctor`, `fetch`, `translate`, `restyle`, and `serve`.
 - `scripts/translate_html_blocks.py`: masks tags, translates text blocks, restores tags, writes paper-viewer HTML.
 - `scripts/codex_translation_schema.json`: constrains Codex subscription translation batches to deterministic `{id, text}` JSON output.
 - `scripts/apply_paper_viewer_style.py`: reapplies viewer CSS, fixes ar5iv asset links, optionally restores original table HTML.
 - `scripts/bootstrap_python_env.sh`: creates `.venv` without `uv` and installs runtime Python dependencies.
-- `scripts/build_macos_app.sh`: builds the SwiftUI desktop wrapper into `dist/Paper Translator.app`.
+- `scripts/build_macos_app.sh`: builds the SwiftUI desktop wrapper into `dist/KPaper.app`.
 
 ## Notes
 

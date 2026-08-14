@@ -836,7 +836,7 @@ def call_codex(model: str, batch: list[tuple[str, str]], timeout: int, retries: 
     )
     last: Exception | None = None
     for attempt in range(retries + 1):
-        output_path = Path(tempfile.gettempdir()) / f"paper-translator-codex-{os.getpid()}-{time.time_ns()}.json"
+        output_path = Path(tempfile.gettempdir()) / f"kpaper-codex-{os.getpid()}-{time.time_ns()}.json"
         command = [
             codex,
             "exec",

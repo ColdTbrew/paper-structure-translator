@@ -11,7 +11,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import pdf_layout  # noqa: E402
-import paper_translator  # noqa: E402
+import kpaper  # noqa: E402
 
 
 class GroundedLayoutParserTests(unittest.TestCase):
@@ -63,11 +63,11 @@ class LayoutFallbackTests(unittest.TestCase):
 
         native_blocks = [pdf_layout.LayoutBlock("text", (1, 2, 3, 4), "fallback")]
         with mock.patch.object(
-            paper_translator.pdf_layout,
+            kpaper.pdf_layout,
             "extract_native_pdf_layout",
             return_value=native_blocks,
         ) as extract_native:
-            blocks, raw_layout, reason = paper_translator.extract_image_layout_with_fallback(
+            blocks, raw_layout, reason = kpaper.extract_image_layout_with_fallback(
                 Path("paper.pdf"), 2, Path("page.png"), EmptyLayoutEngine()
             )
 

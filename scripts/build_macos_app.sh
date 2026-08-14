@@ -2,7 +2,7 @@
 set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-APP_NAME="Paper Translator"
+APP_NAME="KPaper"
 PACKAGE_DIR="$ROOT_DIR/macos-app"
 DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
@@ -14,7 +14,7 @@ swift build --package-path "$PACKAGE_DIR" -c release
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
-cp "$PACKAGE_DIR/.build/release/PaperTranslatorMac" "$MACOS_DIR/PaperTranslatorMac"
+cp "$PACKAGE_DIR/.build/release/KPaperMac" "$MACOS_DIR/KPaperMac"
 cp "$PACKAGE_DIR/Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 
 cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
@@ -23,13 +23,13 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>PaperTranslatorMac</string>
+  <string>KPaperMac</string>
   <key>CFBundleIdentifier</key>
-  <string>io.codex.paper-translator</string>
+  <string>io.codex.kpaper</string>
   <key>CFBundleName</key>
-  <string>Paper Translator</string>
+  <string>KPaper</string>
   <key>CFBundleDisplayName</key>
-  <string>Paper Translator</string>
+  <string>KPaper</string>
   <key>CFBundleIconFile</key>
   <string>AppIcon</string>
   <key>CFBundlePackageType</key>

@@ -6,7 +6,7 @@ If a user gives you only this repository URL, use this file as the operating gui
 
 1. Set up with `uv sync`.
 2. Ask the user for `OPENAI_API_KEY` and `OPENAI_BASE_URL` if `.env` is not already present.
-3. Use `./paper-translator` for `doctor`, `fetch`, `pdf-import`, `translate`, `restyle`, and `serve`.
+3. Use `./kpaper` for `doctor`, `fetch`, `pdf-import`, `translate`, `restyle`, and `serve`.
 4. Verify generated HTML in a real browser.
 5. Never commit `.env`, `inputs/`, `outputs/`, or cache files unless the user explicitly changes the repo policy.
 
@@ -28,14 +28,14 @@ The pipeline should:
 
 - `README.md`: English user documentation.
 - `README.ko.md`: Korean user documentation.
-- `paper-translator`: primary CLI wrapper; it runs `scripts/paper_translator.py` through `uv`.
-- `scripts/paper_translator.py`: agent-aware CLI with `--json` and `--dry-run` support.
+- `kpaper`: primary CLI wrapper; it runs `scripts/kpaper.py` through `uv`.
+- `scripts/kpaper.py`: agent-aware CLI with `--json` and `--dry-run` support.
 - `scripts/translate_html_blocks.py`: masks HTML tags, translates text blocks, restores tags, and writes viewer HTML.
 - `scripts/apply_paper_viewer_style.py`: reapplies viewer CSS and restores source tables without calling the model.
-- `macos-app/`: native SwiftUI desktop wrapper for drag-and-drop PDFs and clipboard URL translation. It runs `uv run scripts/paper_translator.py` so the app uses the same dependency graph as `./paper-translator`.
+- `macos-app/`: native SwiftUI desktop wrapper for drag-and-drop PDFs and clipboard URL translation. It runs `uv run scripts/kpaper.py` so the app uses the same dependency graph as `./kpaper`.
 - `scripts/bootstrap_python_env.sh`: optional helper that creates `.venv` and installs runtime Python dependencies for standalone scripting outside the app.
-- `scripts/build_macos_app.sh`: builds `dist/Paper Translator.app` for local desktop use.
-- `skills/paper-structure-translator/SKILL.md`: reusable skill instructions for agents.
+- `scripts/build_macos_app.sh`: builds `dist/KPaper.app` for local desktop use.
+- `skills/kpaper/SKILL.md`: reusable skill instructions for agents.
 
 ## Setup
 
@@ -60,13 +60,13 @@ Do not invent or commit secrets. If credentials are missing, run only non-networ
 Check readiness:
 
 ```bash
-./paper-translator doctor --json
+./kpaper doctor --json
 ```
 
 Fetch source HTML with explicit flags:
 
 ```bash
-./paper-translator fetch \
+./kpaper fetch \
   --paper-id mmdocrag \
   --source-url https://ar5iv.labs.arxiv.org/html/2505.16470v2 \
   --json
@@ -75,7 +75,7 @@ Fetch source HTML with explicit flags:
 For PDF-only papers, first import the PDF. `uv sync` installs LiteParse, MLX-VLM, Pillow, and PyMuPDF. Agents may also add the LiteParse skill instructions with `npx skills add run-llama/llamaparse-agent-skills --skill liteparse`.
 
 ```bash
-./paper-translator pdf-import \
+./kpaper pdf-import \
   --paper-id deepseek-v4 \
   --pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf \
   --title "DeepSeek V4" \
@@ -89,7 +89,7 @@ The command normalizes Hugging Face `/blob/...` URLs to `/resolve/...`, stores t
 Dry run before calling the model:
 
 ```bash
-./paper-translator translate \
+./kpaper translate \
   --paper-id mmdocrag \
   --json \
   --dry-run
@@ -98,7 +98,7 @@ Dry run before calling the model:
 Actual run:
 
 ```bash
-./paper-translator translate --paper-id mmdocrag
+./kpaper translate --paper-id mmdocrag
 ```
 
 ## Style-Only Refresh
@@ -106,7 +106,7 @@ Actual run:
 If translated HTML already exists and the user only wants CSS/viewer/table fixes, do not call the LLM. Reapply style and restore tables:
 
 ```bash
-./paper-translator restyle --paper-id mmdocrag
+./kpaper restyle --paper-id mmdocrag
 ```
 
 ## Verification Checklist
@@ -123,13 +123,13 @@ For the macOS wrapper, run:
 ./scripts/bootstrap_python_env.sh
 swift build --package-path macos-app
 ./scripts/build_macos_app.sh
-plutil -lint "dist/Paper Translator.app/Contents/Info.plist"
+plutil -lint "dist/KPaper.app/Contents/Info.plist"
 ```
 
 For browser verification:
 
 ```bash
-./paper-translator serve --port 8799
+./kpaper serve --port 8799
 ```
 
 Then open generated files, for example:
@@ -156,8 +156,8 @@ Check:
 - Before committing, check for secrets:
 
 ```bash
-rg -n -e 'sk-[A-Za-z0-9]' -e 'OPENAI_API_KEY=.*sk-[A-Za-z0-9]' README.md README.ko.md AGENTS.md CLAUDE.md skills scripts paper-translator .env.example pyproject.toml uv.lock || true
+rg -n -e 'sk-[A-Za-z0-9]' -e 'OPENAI_API_KEY=.*sk-[A-Za-z0-9]' README.md README.ko.md AGENTS.md CLAUDE.md skills scripts kpaper .env.example pyproject.toml uv.lock || true
 ```
 
 - Do not include full translated paper outputs in git unless the user explicitly asks and redistribution is permitted.
-- Keep changes scoped. If the user asks for a viewer/layout fix, prefer `./paper-translator restyle` or CSS changes over rerunning translation.
+- Keep changes scoped. If the user asks for a viewer/layout fix, prefer `./kpaper restyle` or CSS changes over rerunning translation.

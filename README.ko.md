@@ -1,8 +1,8 @@
-# 구조 보존 논문 번역기
+# KPaper
 
 [English](README.md) | [한국어](README.ko.md)
 
-네이티브 macOS 작업 공간, ChatGPT/Codex 구독 로그인, OpenAI 호환 API를 지원하는 구조 보존형 한국어 논문 번역기입니다.
+논문의 원래 구조를 유지한 채 한국어로 읽습니다. KPaper는 네이티브 macOS 작업 공간, ChatGPT/Codex 구독 로그인, OpenAI 호환 API를 지원합니다.
 
 목표는 논문 요약이 아닙니다. 원문 논문의 구조와 읽는 흐름을 최대한 유지하면서, 본문 텍스트를 가능한 한 직역에 가깝게 번역하는 것이 목표입니다.
 
@@ -10,13 +10,13 @@
 
 네이티브 macOS 앱에서 arXiv/ar5iv 링크를 입력하거나 PDF를 끌어다 놓습니다.
 
-![Paper Translator 문서 가져오기](docs/paper-translator-lingopaper-v2.png)
+![KPaper 문서 가져오기](docs/kpaper-lingopaper-v2.png)
 
 문서 가져오기부터 구조 보존 번역 진행 상황, 최종 논문 읽기까지 하나의 작업 공간에서 처리합니다.
 
 | 번역 진행 | 내장 논문 리더 |
 | --- | --- |
-| ![구조 보존 번역 진행 화면](docs/paper-translator-progress.png) | ![Paper Translator 내장 리더](docs/paper-translator-reader.png) |
+| ![구조 보존 번역 진행 화면](docs/kpaper-progress.png) | ![KPaper 내장 리더](docs/kpaper-reader.png) |
 
 생성된 HTML은 조용한 논문 리더처럼 보이도록 설계되어 있습니다. 그림과 표는 제자리에 남고, 인용과 링크는 유지되며, 번역된 본문은 한 줄씩 읽기 좋게 표시됩니다.
 
@@ -48,7 +48,7 @@
 
 - `AGENTS.md`: 전체 에이전트 작업 가이드
 - `CLAUDE.md`: Claude Code 전용 기본 지침
-- `skills/paper-structure-translator/SKILL.md`: 재사용 가능한 skill 형식 지침
+- `skills/kpaper/SKILL.md`: 재사용 가능한 skill 형식 지침
 
 ## 설정
 
@@ -69,12 +69,12 @@ codex login
 codex login status
 ```
 
-로그인, 자격증명 저장, 토큰 갱신은 Codex에 위임합니다. Paper Translator는 OAuth 토큰을 직접 읽거나 저장하지 않습니다. 설정에서 `ChatGPT / Codex 구독`을 선택한 뒤 모델을 고릅니다.
+로그인, 자격증명 저장, 토큰 갱신은 Codex에 위임합니다. KPaper는 OAuth 토큰을 직접 읽거나 저장하지 않습니다. 설정에서 `ChatGPT / Codex 구독`을 선택한 뒤 모델을 고릅니다.
 
 CLI에서도 같은 provider를 사용할 수 있습니다.
 
 ```bash
-./paper-translator translate \
+./kpaper translate \
   --paper-id mmdocrag \
   --provider codex \
   --model gpt-5.4-mini
@@ -104,13 +104,13 @@ macOS 앱에서는 `OpenAI 호환 API`를 선택해 OpenAI Base URL과 모델을
 OpenAI 호환 API provider를 사용할 때는 먼저 로컬 환경을 확인합니다.
 
 ```bash
-./paper-translator doctor
+./kpaper doctor
 ```
 
 명시적인 CLI 플래그로 소스 HTML을 가져옵니다.
 
 ```bash
-./paper-translator fetch \
+./kpaper fetch \
   --paper-id mmdocrag \
   --source-url https://ar5iv.labs.arxiv.org/html/2505.16470v2
 ```
@@ -118,13 +118,13 @@ OpenAI 호환 API provider를 사용할 때는 먼저 로컬 환경을 확인합
 모든 명령은 에이전트가 읽기 좋은 JSON 출력을 지원합니다.
 
 ```bash
-./paper-translator doctor --json
+./kpaper doctor --json
 ```
 
 모델을 호출하기 전에 드라이런으로 블록 수를 확인합니다.
 
 ```bash
-./paper-translator translate \
+./kpaper translate \
   --paper-id mmdocrag \
   --dry-run
 ```
@@ -132,7 +132,7 @@ OpenAI 호환 API provider를 사용할 때는 먼저 로컬 환경을 확인합
 그다음 실제 번역을 실행합니다. 기본 provider는 `api`이며, 로그인된 ChatGPT/Codex 구독을 쓰려면 `--provider codex`를 전달합니다.
 
 ```bash
-./paper-translator translate --paper-id mmdocrag
+./kpaper translate --paper-id mmdocrag
 ```
 
 출력 파일은 다음과 같습니다.
@@ -147,7 +147,7 @@ outputs/mmdocrag.ko-en.paper.html
 
 ## macOS 앱
 
-이 레포에는 로컬 데스크톱용 네이티브 SwiftUI 작업 공간이 포함되어 있습니다. 인터페이스와 내장 리더는 macOS 네이티브 구성 요소를 사용하고, 번역 엔진은 `./paper-translator`와 같은 `uv` 관리 Python 파이프라인으로 실행됩니다.
+이 레포에는 로컬 데스크톱용 네이티브 SwiftUI 작업 공간이 포함되어 있습니다. 인터페이스와 내장 리더는 macOS 네이티브 구성 요소를 사용하고, 번역 엔진은 `./kpaper`와 같은 `uv` 관리 Python 파이프라인으로 실행됩니다.
 
 앱 런타임은 다음 명령으로 준비합니다.
 
@@ -170,7 +170,7 @@ uv sync
 번들은 다음 위치에 생성됩니다.
 
 ```text
-dist/Paper Translator.app
+dist/KPaper.app
 ```
 
 앱에서 할 수 있는 일:
@@ -187,16 +187,16 @@ dist/Paper Translator.app
 
 ### 설정의 Codex OAuth
 
-![ChatGPT와 Codex 구독 로그인](docs/paper-translator-codex-oauth.png)
+![ChatGPT와 Codex 구독 로그인](docs/kpaper-codex-oauth.png)
 
-`ChatGPT / Codex 구독`은 로컬에 설치된 Codex 런타임을 사용합니다. `ChatGPT로 로그인`은 Codex가 관리하는 브라우저 로그인을 열고, `상태 확인`은 Paper Translator에 토큰을 노출하지 않은 채 현재 계정을 확인합니다. 구현은 [Codex app-server 프로토콜](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)에 설명된 관리형 인증 경계를 따릅니다.
+`ChatGPT / Codex 구독`은 로컬에 설치된 Codex 런타임을 사용합니다. `ChatGPT로 로그인`은 Codex가 관리하는 브라우저 로그인을 열고, `상태 확인`은 KPaper에 토큰을 노출하지 않은 채 현재 계정을 확인합니다. 구현은 [Codex app-server 프로토콜](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)에 설명된 관리형 인증 경계를 따릅니다.
 
 ## 다른 논문 번역하기
 
 새 ar5iv URL을 CLI에 직접 넘깁니다. `--paper-id`를 기준으로 입력, 출력, 캐시, 병행 출력 경로가 자동으로 정해집니다.
 
 ```bash
-./paper-translator translate \
+./kpaper translate \
   --paper-id your-paper \
   --source-url https://ar5iv.labs.arxiv.org/html/... \
   --dry-run
@@ -221,7 +221,7 @@ npx skills add run-llama/llamaparse-agent-skills --skill liteparse
 Hugging Face의 `/blob/...` PDF URL은 자동으로 `/resolve/...` 원본 PDF URL로 정규화됩니다.
 
 ```bash
-./paper-translator pdf-import \
+./kpaper pdf-import \
   --paper-id deepseek-v4 \
   --pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf \
   --title "DeepSeek V4" \
@@ -239,8 +239,8 @@ inputs/deepseek-v4.source.html
 그다음 기존 번역 명령을 그대로 사용합니다.
 
 ```bash
-./paper-translator translate --paper-id deepseek-v4 --dry-run
-./paper-translator translate --paper-id deepseek-v4
+./kpaper translate --paper-id deepseek-v4 --dry-run
+./kpaper translate --paper-id deepseek-v4
 ```
 
 레이아웃 백엔드는 모델이 반환한 읽기 순서로 텍스트를 재배치하고, 감지한 표·차트·그림을 원본 페이지에서 잘라 앞뒤 본문 블록 사이에 삽입합니다. 검증용 원본 페이지 스크린샷도 `inputs/assets/`에 그대로 보존합니다.
@@ -249,7 +249,7 @@ inputs/deepseek-v4.source.html
 
 ```bash
 uv sync
-./paper-translator pdf-import \
+./kpaper pdf-import \
   --paper-id scanned-paper \
   --pdf scan.pdf \
   --layout-backend unlimited-ocr-mlx \
@@ -263,18 +263,18 @@ uv sync
 이미 번역된 HTML이 있고, 리더 CSS를 새로 적용하거나 원본 표를 다시 복원하고 싶다면 다음 명령을 사용합니다.
 
 ```bash
-./paper-translator restyle --paper-id mmdocrag
+./kpaper restyle --paper-id mmdocrag
 ```
 
 ## 스크립트
 
-- `paper-translator`: `uv`를 통해 `scripts/paper_translator.py`를 실행하는 CLI 래퍼입니다.
-- `scripts/paper_translator.py`: `doctor`, `fetch`, `translate`, `restyle`, `serve`를 제공하는 에이전트 친화 CLI입니다.
+- `kpaper`: `uv`를 통해 `scripts/kpaper.py`를 실행하는 CLI 래퍼입니다.
+- `scripts/kpaper.py`: `doctor`, `fetch`, `translate`, `restyle`, `serve`를 제공하는 에이전트 친화 CLI입니다.
 - `scripts/translate_html_blocks.py`: 태그를 마스킹하고, 텍스트 블록을 번역하고, 태그를 복원한 뒤 논문 리더 HTML을 작성합니다.
 - `scripts/codex_translation_schema.json`: Codex 구독 번역 배치가 결정적인 `{id, text}` JSON 결과를 반환하도록 제한합니다.
 - `scripts/apply_paper_viewer_style.py`: 리더 CSS를 다시 적용하고, ar5iv asset 링크를 고치며, 선택적으로 원본 표 HTML을 복원합니다.
 - `scripts/bootstrap_python_env.sh`: `uv` 없이 `.venv`를 만들고 Python 런타임 의존성을 설치합니다.
-- `scripts/build_macos_app.sh`: SwiftUI 데스크톱 래퍼를 `dist/Paper Translator.app`으로 빌드합니다.
+- `scripts/build_macos_app.sh`: SwiftUI 데스크톱 래퍼를 `dist/KPaper.app`으로 빌드합니다.
 
 ## 참고
 

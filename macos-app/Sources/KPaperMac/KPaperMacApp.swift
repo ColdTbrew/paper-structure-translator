@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 import WebKit
 
 @main
-struct PaperTranslatorMacApp: App {
+struct KPaperMacApp: App {
     @StateObject private var model = TranslatorModel()
 
     var body: some Scene {
@@ -74,16 +74,12 @@ struct WorkspaceView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            windowChrome
-
-            HStack(spacing: 0) {
-                if !(destination == .translation && stage == .reader) {
-                    sidebar
-                    Divider()
-                }
-                mainContent
+        HStack(spacing: 0) {
+            if !(destination == .translation && stage == .reader) {
+                sidebar
+                Divider()
             }
+            mainContent
         }
         .background(WorkspacePalette.canvas)
         .fileImporter(
@@ -118,67 +114,6 @@ struct WorkspaceView: View {
             }
         }
         .animation(reduceMotion ? .linear(duration: 0.12) : .spring(response: 0.34, dampingFraction: 0.92), value: stage)
-    }
-
-    private var windowChrome: some View {
-        HStack(spacing: 12) {
-            Text("Paper Translator")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-
-            Spacer(minLength: 16)
-
-            HStack(spacing: 8) {
-                Image(systemName: chromeIcon)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(WorkspacePalette.secondaryText)
-                Text(chromeTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 16)
-
-            Image(systemName: "ellipsis")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(WorkspacePalette.secondaryText)
-                .frame(width: 28, height: 28)
-                .accessibilityHidden(true)
-        }
-        .padding(.leading, 82)
-        .padding(.trailing, 14)
-        .frame(height: 52)
-        .background(WorkspacePalette.chrome)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(WorkspacePalette.border)
-                .frame(height: 1)
-        }
-    }
-
-    private var chromeTitle: String {
-        switch destination {
-        case .translation:
-            switch stage {
-            case .importDocument: return "새 번역"
-            case .translating: return "번역 진행 중"
-            case .reader: return readerPaperID
-            }
-        case .recent: return "최근 문서"
-        case .documents: return "내 문서"
-        case .settings: return "설정"
-        }
-    }
-
-    private var chromeIcon: String {
-        switch destination {
-        case .translation:
-            return stage == .reader ? "doc.text" : "plus"
-        case .recent: return "clock"
-        case .documents: return "folder"
-        case .settings: return "gearshape"
-        }
     }
 
     private var sidebar: some View {
@@ -241,7 +176,8 @@ struct WorkspaceView: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
         }
-        .padding(.vertical, 14)
+        .padding(.bottom, 14)
+        .padding(.top, 46)
         .frame(width: 156, alignment: .topLeading)
         .background(WorkspacePalette.sidebar)
     }
@@ -506,6 +442,7 @@ struct WorkspaceView: View {
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
+            .padding(.top, 28)
             .background(.thinMaterial)
 
             Divider()
@@ -1228,7 +1165,6 @@ private struct PaperWebPreview: NSViewRepresentable {
 
 private enum WorkspacePalette {
     static let canvas = Color(nsColor: .textBackgroundColor)
-    static let chrome = Color(nsColor: .textBackgroundColor).opacity(0.96)
     static let sidebar = Color(nsColor: .windowBackgroundColor)
     static let panel = Color(nsColor: .controlBackgroundColor)
     static let controlFill = Color(nsColor: .unemphasizedSelectedContentBackgroundColor).opacity(0.72)
@@ -1378,7 +1314,7 @@ struct ContentView: View {
                 .background(AppPalette.accentGradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                 .shadow(color: AppPalette.accentTeal.opacity(0.24), radius: 12, y: 5)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Paper Translator")
+                Text("KPaper")
                     .font(AppTypography.display(size: 26, weight: .bold))
                     .tracking(-0.5)
                     .foregroundStyle(AppPalette.textPrimary)
@@ -1511,7 +1447,7 @@ struct ContentView: View {
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
                 GridRow {
                     Text("프로젝트")
-                    TextField("paper-structure-translator 경로", text: $model.repoPath)
+                    TextField("KPaper 경로", text: $model.repoPath)
                         .textFieldStyle(GlassTextFieldStyle())
                     Button("저장") {
                         model.saveSettings()
@@ -2195,9 +2131,9 @@ final class TranslatorModel: ObservableObject {
     private func runCommand(_ arguments: [String], settings: RuntimeSettings, workflowID: UUID) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             DispatchQueue.global(qos: .userInitiated).async {
-                let script = URL(fileURLWithPath: settings.repoPath).appendingPathComponent("scripts/paper_translator.py")
+                let script = URL(fileURLWithPath: settings.repoPath).appendingPathComponent("scripts/kpaper.py")
                 guard FileManager.default.fileExists(atPath: script.path) else {
-                    continuation.resume(throwing: AppError.message("scripts/paper_translator.py not found at \(script.path)"))
+                    continuation.resume(throwing: AppError.message("scripts/kpaper.py not found at \(script.path)"))
                     return
                 }
                 guard let uv = Self.resolveUVExecutable() else {
@@ -2208,7 +2144,7 @@ final class TranslatorModel: ObservableObject {
                 let process = Process()
                 process.currentDirectoryURL = URL(fileURLWithPath: settings.repoPath)
                 process.executableURL = uv
-                process.arguments = ["run", "scripts/paper_translator.py"] + arguments
+                process.arguments = ["run", "scripts/kpaper.py"] + arguments
 
                 var env = ProcessInfo.processInfo.environment
                 env["UV_CACHE_DIR"] = ".uv-cache"
@@ -2242,7 +2178,7 @@ final class TranslatorModel: ObservableObject {
                 DispatchQueue.main.async {
                     self.currentProcesses[workflowID] = process
                     let displayUV = uv.path.replacingOccurrences(of: settings.repoPath + "/", with: "")
-                    self.appendLog("$ \(displayUV) run scripts/paper_translator.py \(arguments.joined(separator: " "))", workflowID: workflowID)
+                    self.appendLog("$ \(displayUV) run scripts/kpaper.py \(arguments.joined(separator: " "))", workflowID: workflowID)
                 }
 
                 do {
@@ -2469,7 +2405,7 @@ final class TranslatorModel: ObservableObject {
         for start in starts {
             var cursor = start.standardizedFileURL
             for _ in 0..<10 {
-                let candidate = cursor.appendingPathComponent("paper-translator")
+                let candidate = cursor.appendingPathComponent("kpaper")
                 if fileManager.isExecutableFile(atPath: candidate.path) {
                     return cursor.path
                 }
@@ -2483,9 +2419,9 @@ final class TranslatorModel: ObservableObject {
 
     private static func isLiteParseRepo(atPath path: String) -> Bool {
         let root = URL(fileURLWithPath: path)
-        let script = root.appendingPathComponent("scripts/paper_translator.py")
+        let script = root.appendingPathComponent("scripts/kpaper.py")
         let manifest = root.appendingPathComponent("pyproject.toml")
-        guard FileManager.default.isExecutableFile(atPath: root.appendingPathComponent("paper-translator").path),
+        guard FileManager.default.isExecutableFile(atPath: root.appendingPathComponent("kpaper").path),
               FileManager.default.fileExists(atPath: script.path),
               FileManager.default.fileExists(atPath: manifest.path) else {
             return false
@@ -2608,7 +2544,7 @@ final class TranslatorModel: ObservableObject {
             return false
         }
         let semaphore = DispatchSemaphore(value: 0)
-        let queue = DispatchQueue(label: "paper-translator.endpoint-check")
+        let queue = DispatchQueue(label: "kpaper.endpoint-check")
         let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
         var isReady = false
 

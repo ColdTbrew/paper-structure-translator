@@ -107,7 +107,7 @@ def resolve_paths(args: argparse.Namespace) -> dict[str, Path]:
     if not paper_id:
         fail(
             "--paper-id is required when --input is not provided",
-            "try: scripts/paper_translator.py translate --paper-id my-paper --source-url https://ar5iv.labs.arxiv.org/html/...",
+            "try: scripts/kpaper.py translate --paper-id my-paper --source-url https://ar5iv.labs.arxiv.org/html/...",
         )
 
     input_path = input_path or Path("inputs") / f"{paper_id}.source.html"
@@ -521,8 +521,8 @@ def command_pdf_import(args: argparse.Namespace) -> None:
         "fetch": fetch_result,
         "result": import_result,
         "next": {
-            "dry_run_translate": f"./paper-translator translate --paper-id {paper_id} --dry-run",
-            "translate": f"./paper-translator translate --paper-id {paper_id}",
+            "dry_run_translate": f"./kpaper translate --paper-id {paper_id} --dry-run",
+            "translate": f"./kpaper translate --paper-id {paper_id}",
         },
     }
     emit(args, payload, f"{import_result['status']} {html_path}")
@@ -550,7 +550,7 @@ def command_translate(args: argparse.Namespace) -> None:
     if not paths["input"].exists() and not args.dry_run:
         fail(
             f"input HTML not found: {paths['input']}",
-            f"try: scripts/paper_translator.py fetch --paper-id {args.paper_id} --source-url https://ar5iv.labs.arxiv.org/html/...",
+            f"try: scripts/kpaper.py fetch --paper-id {args.paper_id} --source-url https://ar5iv.labs.arxiv.org/html/...",
         )
 
     translated_args = [
@@ -622,7 +622,7 @@ def command_restyle(args: argparse.Namespace) -> None:
     if not paths["output"].exists():
         fail(
             f"translated HTML not found: {paths['output']}",
-            f"try: scripts/paper_translator.py translate --paper-id {args.paper_id} --input {source_path}",
+            f"try: scripts/kpaper.py translate --paper-id {args.paper_id} --input {source_path}",
         )
     if not source_path.exists():
         fail(f"source HTML not found: {source_path}")
@@ -687,7 +687,7 @@ def add_path_flags(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="paper-translator",
+        prog="kpaper",
         description="Agent-aware CLI for structure-preserving Korean paper HTML translation.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -696,7 +696,7 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor",
         help="check local environment readiness",
         description="Check whether dependencies, directories, and headless API credentials are ready.",
-        epilog="example: scripts/paper_translator.py doctor --json",
+        epilog="example: scripts/kpaper.py doctor --json",
     )
     add_common_flags(doctor)
     doctor.add_argument("--env-file", default=".env")
@@ -706,7 +706,7 @@ def build_parser() -> argparse.ArgumentParser:
         "fetch",
         help="download one ar5iv HTML source",
         description="Download a single ar5iv HTML document into inputs/ using explicit CLI flags.",
-        epilog="example: scripts/paper_translator.py fetch --paper-id my-paper --source-url https://ar5iv.labs.arxiv.org/html/...",
+        epilog="example: scripts/kpaper.py fetch --paper-id my-paper --source-url https://ar5iv.labs.arxiv.org/html/...",
     )
     add_common_flags(fetch)
     fetch.add_argument("--paper-id", required=True)
@@ -721,7 +721,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="convert a PDF into image-backed source HTML",
         description="Download or read a PDF, render page images with Python LiteParse, extract text blocks, and write inputs/<paper-id>.source.html.",
         epilog=(
-            "example: scripts/paper_translator.py pdf-import --paper-id deepseek-v4 "
+            "example: scripts/kpaper.py pdf-import --paper-id deepseek-v4 "
             "--pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/resolve/main/DeepSeek_V4.pdf"
         ),
     )
@@ -760,7 +760,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="translate one paper into Korean reader HTML",
         description="Translate one source HTML file and write Korean-only plus bilingual reader HTML.",
         epilog=(
-            "example: scripts/paper_translator.py translate --paper-id my-paper "
+            "example: scripts/kpaper.py translate --paper-id my-paper "
             "--source-url https://ar5iv.labs.arxiv.org/html/... --dry-run"
         ),
     )
@@ -784,7 +784,7 @@ def build_parser() -> argparse.ArgumentParser:
         "restyle",
         help="refresh viewer CSS and restore source tables",
         description="Reapply viewer styling and rebuild bilingual output without making model calls.",
-        epilog="example: scripts/paper_translator.py restyle --paper-id mmdocrag",
+        epilog="example: scripts/kpaper.py restyle --paper-id mmdocrag",
     )
     add_common_flags(restyle)
     add_path_flags(restyle)
@@ -796,7 +796,7 @@ def build_parser() -> argparse.ArgumentParser:
         "serve",
         help="serve the workspace for browser verification",
         description="Start a local static file server for inspecting generated outputs in a browser.",
-        epilog="example: scripts/paper_translator.py serve --port 8799",
+        epilog="example: scripts/kpaper.py serve --port 8799",
     )
     add_common_flags(serve)
     serve.add_argument("--host", default="127.0.0.1")

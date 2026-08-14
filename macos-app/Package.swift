@@ -2,17 +2,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "PaperTranslatorMac",
+    name: "KPaperMac",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "PaperTranslatorMac", targets: ["PaperTranslatorMac"])
+        .executable(name: "KPaperMac", targets: ["KPaperMac"])
     ],
     targets: [
         .executableTarget(
-            name: "PaperTranslatorMac",
-            path: "Sources/PaperTranslatorMac"
+            name: "KPaperMac",
+            path: "Sources/KPaperMac"
         )
     ]
 )

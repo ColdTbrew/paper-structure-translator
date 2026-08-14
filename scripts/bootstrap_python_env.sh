@@ -33,4 +33,4 @@ else
   exit 1
 fi
 
-.venv/bin/python scripts/paper_translator.py doctor --json
+.venv/bin/python scripts/kpaper.py doctor --json
