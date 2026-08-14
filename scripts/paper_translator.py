@@ -237,6 +237,21 @@ def text_blocks_from_liteparse_page(page: Any) -> list[str]:
     return [block for block in blocks if block]
 
 
+def extract_image_layout_with_fallback(
+    pdf_path: Path,
+    page_index: int,
+    page_image: Path,
+    layout_engine: Any,
+) -> tuple[list[pdf_layout.LayoutBlock], str, str]:
+    """Fall back to native PDF geometry when ML layout fails for one page."""
+    try:
+        blocks, raw_layout = layout_engine.parse_image(page_image)
+        return blocks, raw_layout, ""
+    except RuntimeError as exc:
+        fallback_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
+        return fallback_blocks, "", str(exc)
+
+
 def write_liteparse_screenshots(
     shots: list[Any],
     assets_dir: Path,
@@ -294,6 +309,7 @@ def pdf_to_source_html(
     page_sections: list[str] = []
     text_blocks = 0
     visual_blocks = 0
+    layout_fallbacks: list[dict[str, Any]] = []
     layout_engine = (
         pdf_layout.UnlimitedOCRMLX(model_id=layout_model, max_tokens=layout_max_tokens)
         if layout_backend == "unlimited-ocr-mlx"
@@ -313,7 +329,18 @@ def pdf_to_source_html(
         page_image = image_paths[page_index] if page_index < len(image_paths) else None
         if layout_backend != "liteparse" and page_image is not None:
             if layout_engine is not None:
-                layout_blocks, raw_layout = layout_engine.parse_image(page_image)
+                layout_blocks, raw_layout, fallback_reason = extract_image_layout_with_fallback(
+                    pdf_path, page_index, page_image, layout_engine
+                )
+                if fallback_reason:
+                    layout_fallbacks.append(
+                        {
+                            "page": page_index + 1,
+                            "from": "unlimited-ocr-mlx",
+                            "to": "native" if layout_blocks else "liteparse",
+                            "reason": fallback_reason,
+                        }
+                    )
                 layout_blocks = [
                     block
                     for block in layout_blocks
@@ -327,20 +354,34 @@ def pdf_to_source_html(
             else:
                 layout_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
                 raw_layout = ""
-            page_html, page_visuals = pdf_layout.render_layout_page(
-                layout_blocks,
-                page_image=page_image,
-                assets_dir=assets_dir,
-                html_parent=html_path.parent,
-                paper_id=paper_id,
-                page_num=page_index + 1,
-            )
-            if raw_layout:
-                raw_layout_path = assets_dir / "layout" / f"page-{page_index + 1:04d}.grounding.txt"
-                raw_layout_path.parent.mkdir(parents=True, exist_ok=True)
-                raw_layout_path.write_text(raw_layout, encoding="utf-8")
-            text_blocks += sum(1 for block in layout_blocks if not pdf_layout.is_visual_block(block))
-            visual_blocks += page_visuals
+            if layout_blocks:
+                page_html, page_visuals = pdf_layout.render_layout_page(
+                    layout_blocks,
+                    page_image=page_image,
+                    assets_dir=assets_dir,
+                    html_parent=html_path.parent,
+                    paper_id=paper_id,
+                    page_num=page_index + 1,
+                )
+                if raw_layout:
+                    raw_layout_path = assets_dir / "layout" / f"page-{page_index + 1:04d}.grounding.txt"
+                    raw_layout_path.parent.mkdir(parents=True, exist_ok=True)
+                    raw_layout_path.write_text(raw_layout, encoding="utf-8")
+                text_blocks += sum(1 for block in layout_blocks if not pdf_layout.is_visual_block(block))
+                visual_blocks += page_visuals
+            else:
+                paragraphs = text_blocks_from_liteparse_page(page)
+                text_blocks += len(paragraphs)
+                image_src = pdf_layout.relative_asset_src(page_image, html_path.parent)
+                paragraph_html = "\n".join(
+                    f'<div class="ltx_para" id="p{page_index + 1}-{idx + 1}"><p class="ltx_p">{html.escape(text)}</p></div>'
+                    for idx, text in enumerate(paragraphs)
+                )
+                page_html = (
+                    f'<figure class="ltx_figure codex_pdf_page_image">'
+                    f'<img class="ltx_graphics" src="{html.escape(image_src)}" alt="PDF page {page_index + 1}">'
+                    f'</figure>\n{paragraph_html}'
+                )
         else:
             paragraphs = text_blocks_from_liteparse_page(page)
             text_blocks += len(paragraphs)
@@ -403,6 +444,7 @@ def pdf_to_source_html(
         "ocr_enabled": False,
         "layout_backend": layout_backend,
         "layout_model": layout_model if layout_engine is not None else "",
+        "layout_fallbacks": layout_fallbacks,
     }
 
 

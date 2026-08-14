@@ -4,12 +4,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import pdf_layout  # noqa: E402
+import paper_translator  # noqa: E402
 
 
 class GroundedLayoutParserTests(unittest.TestCase):
@@ -51,6 +53,28 @@ class GroundedLayoutParserTests(unittest.TestCase):
         self.assertEqual(blocks[0].kind, "title")
         self.assertEqual(blocks[0].bbox, (86.0, 58.0, 480.0, 72.0))
         self.assertEqual(blocks[0].text, "Robust Speech Recognition")
+
+
+class LayoutFallbackTests(unittest.TestCase):
+    def test_uses_native_layout_when_mlx_returns_no_blocks(self) -> None:
+        class EmptyLayoutEngine:
+            def parse_image(self, _image_path: Path):
+                raise RuntimeError("Unlimited-OCR returned no grounded layout blocks")
+
+        native_blocks = [pdf_layout.LayoutBlock("text", (1, 2, 3, 4), "fallback")]
+        with mock.patch.object(
+            paper_translator.pdf_layout,
+            "extract_native_pdf_layout",
+            return_value=native_blocks,
+        ) as extract_native:
+            blocks, raw_layout, reason = paper_translator.extract_image_layout_with_fallback(
+                Path("paper.pdf"), 2, Path("page.png"), EmptyLayoutEngine()
+            )
+
+        self.assertEqual(blocks, native_blocks)
+        self.assertEqual(raw_layout, "")
+        self.assertIn("no grounded layout blocks", reason)
+        extract_native.assert_called_once_with(Path("paper.pdf"), 2)
 
 
 class LayoutRendererTests(unittest.TestCase):
