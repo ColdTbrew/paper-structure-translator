@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 import WebKit
 
 @main
-struct PaperTranslatorMacApp: App {
+struct KPaperMacApp: App {
     @StateObject private var model = TranslatorModel()
 
     var body: some Scene {
@@ -14,7 +14,7 @@ struct PaperTranslatorMacApp: App {
                 .environmentObject(model)
                 .frame(minWidth: 820, minHeight: 640)
         }
-        .windowStyle(.titleBar)
+        .windowStyle(.hiddenTitleBar)
     }
 }
 
@@ -34,7 +34,20 @@ private enum ImportMode: String, CaseIterable, Identifiable {
 private enum SidebarDestination {
     case translation
     case recent
+    case documents
     case settings
+}
+
+struct TranslationJob: Identifiable {
+    let id: UUID
+    let paperID: String
+    let title: String
+    var statusText: String
+    var isRunning: Bool
+    var progressCompleted: Int = 0
+    var progressTotal: Int = 0
+    var progressLabel: String = "준비 중"
+    var logText: String = ""
 }
 
 struct WorkspaceView: View {
@@ -48,6 +61,9 @@ struct WorkspaceView: View {
     @State private var isFileImporterPresented = false
     @State private var readerScrollTarget: String?
     @State private var loadedReaderHeadings: [ReaderHeading] = []
+    @State private var outputDocuments: [OutputDocument] = []
+    @State private var documentSearchText = ""
+    @State private var documentLoadError: String?
     private let readerPreviewEnabled: Bool
 
     init() {
@@ -80,9 +96,21 @@ struct WorkspaceView: View {
                 stage = .translating
             }
         }
+        .onChange(of: model.selectedWorkflowID) { _ in
+            if model.selectedWorkflowIsRunning {
+                destination = .translation
+                stage = .translating
+            }
+        }
         .onChange(of: model.statusText) { status in
             if status == "완료", !model.lastPaperID.isEmpty {
+                reloadOutputDocuments()
                 stage = .reader
+            }
+        }
+        .onChange(of: model.repoPath) { _ in
+            if destination == .documents {
+                reloadOutputDocuments()
             }
         }
         .animation(reduceMotion ? .linear(duration: 0.12) : .spring(response: 0.34, dampingFraction: 0.92), value: stage)
@@ -99,11 +127,42 @@ struct WorkspaceView: View {
             SidebarButton(title: "최근 문서", icon: "clock", isSelected: destination == .recent) {
                 destination = .recent
             }
-            SidebarButton(title: "내 문서", icon: "doc", isSelected: false) {
-                model.openOutputsFolder()
+            SidebarButton(title: "내 문서", icon: "doc", isSelected: destination == .documents) {
+                destination = .documents
+                reloadOutputDocuments()
             }
             SidebarButton(title: "설정", icon: "gearshape", isSelected: destination == .settings) {
                 destination = .settings
+            }
+
+            if !model.runningJobs.isEmpty {
+                Text("진행 중")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(WorkspacePalette.tertiaryText)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 10)
+
+                ForEach(model.runningJobs) { job in
+                    Button {
+                        model.selectWorkflow(job.id)
+                        destination = .translation
+                        stage = .translating
+                    } label: {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(job.paperID)
+                                .font(.system(size: 12, weight: .medium))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 7)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("\(job.title): \(job.progressLabel)")
+                }
             }
 
             Spacer()
@@ -117,9 +176,10 @@ struct WorkspaceView: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
         }
-        .padding(.vertical, 14)
+        .padding(.bottom, 14)
+        .padding(.top, 46)
         .frame(width: 156, alignment: .topLeading)
-        .background(.ultraThinMaterial)
+        .background(WorkspacePalette.sidebar)
     }
 
     @ViewBuilder
@@ -139,6 +199,8 @@ struct WorkspaceView: View {
             }
         case .recent:
             recentScreen
+        case .documents:
+            documentsScreen
         case .settings:
             settingsScreen
         }
@@ -380,6 +442,7 @@ struct WorkspaceView: View {
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
+            .padding(.top, 28)
             .background(.thinMaterial)
 
             Divider()
@@ -447,6 +510,128 @@ struct WorkspaceView: View {
         .padding(.vertical, 34)
     }
 
+    private var documentsScreen: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top, spacing: 16) {
+                screenHeader(
+                    step: nil,
+                    title: "내 문서",
+                    subtitle: "번역된 문서를 앱 안에서 찾아보고 읽을 수 있습니다."
+                )
+                Spacer()
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(WorkspacePalette.tertiaryText)
+                    TextField("문서 검색", text: $documentSearchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                }
+                .padding(.horizontal, 10)
+                .frame(width: 190, height: 34)
+                .background(WorkspacePalette.controlFill)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspacePalette.border))
+                Button {
+                    reloadOutputDocuments()
+                } label: {
+                    Label("새로고침", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(WorkspaceSecondaryButtonStyle())
+                .help("문서 목록 새로고침")
+            }
+
+            if let documentLoadError {
+                VStack(spacing: 14) {
+                    EmptyDocumentView(
+                        title: "문서 폴더를 읽을 수 없습니다",
+                        subtitle: documentLoadError
+                    )
+                    Button("다시 시도") { reloadOutputDocuments() }
+                        .buttonStyle(WorkspacePrimaryButtonStyle(compact: true))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if outputDocuments.isEmpty {
+                EmptyDocumentView(
+                    title: "저장된 문서가 없습니다",
+                    subtitle: "번역이 완료되면 이곳에 문서가 표시됩니다."
+                )
+            } else if filteredOutputDocuments.isEmpty {
+                EmptyDocumentView(
+                    title: "검색 결과가 없습니다",
+                    subtitle: "다른 문서 이름이나 형식을 검색해 보세요."
+                )
+            } else {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("문서 \(filteredOutputDocuments.count)개")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(WorkspacePalette.secondaryText)
+                        Spacer()
+                        Text("최근 수정 순")
+                            .font(.system(size: 11))
+                            .foregroundStyle(WorkspacePalette.tertiaryText)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(height: 38)
+
+                    Divider()
+
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(filteredOutputDocuments) { document in
+                                Button {
+                                    openOutputDocument(document)
+                                } label: {
+                                    OutputDocumentRow(document: document)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityHint("앱 내 리더에서 엽니다")
+
+                                if document.id != filteredOutputDocuments.last?.id {
+                                    Divider().padding(.leading, 70)
+                                }
+                            }
+                        }
+                    }
+                }
+                .background(WorkspacePalette.panel)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(WorkspacePalette.border))
+            }
+        }
+        .padding(.horizontal, 42)
+        .padding(.vertical, 34)
+        .onAppear(perform: reloadOutputDocuments)
+    }
+
+    private var filteredOutputDocuments: [OutputDocument] {
+        let query = documentSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return outputDocuments }
+        return outputDocuments.filter {
+            $0.fileName.localizedCaseInsensitiveContains(query)
+                || $0.paperID.localizedCaseInsensitiveContains(query)
+                || $0.formatLabel.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func reloadOutputDocuments() {
+        do {
+            outputDocuments = try model.loadOutputDocuments()
+            documentLoadError = nil
+        } catch {
+            outputDocuments = []
+            documentLoadError = error.localizedDescription
+        }
+    }
+
+    private func openOutputDocument(_ document: OutputDocument) {
+        model.selectOutputDocument(document)
+        loadedReaderHeadings = []
+        readerScrollTarget = nil
+        destination = .translation
+        stage = .reader
+    }
+
     private var settingsScreen: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -498,6 +683,16 @@ struct WorkspaceView: View {
                             }
                         }
                         .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Divider().padding(.leading, 18)
+                    SettingRow(title: "PDF 레이아웃") {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Toggle("표·차트·그림을 본문 위치에 삽입", isOn: $model.useAdvancedPDFLayout)
+                            Text("sahilchachra/unlimited-ocr-mxfp8-mlx · Apple Silicon 로컬 처리")
+                                .font(.system(size: 11))
+                                .foregroundStyle(WorkspacePalette.secondaryText)
+                        }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if model.selectedProvider == .api {
@@ -565,7 +760,7 @@ struct WorkspaceView: View {
                 .appendingPathComponent("outputs/mmdocrag.ko.paper.html")
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
         }
-        return model.outputURL(kind: .korean)
+        return model.readerOutputURL()
     }
 
 }
@@ -606,6 +801,54 @@ private struct ImportModeSelector: View {
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspacePalette.border))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("가져오기 방식")
+    }
+}
+
+private struct OutputDocumentRow: View {
+    let document: OutputDocument
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(WorkspacePalette.blue.opacity(0.08))
+                Image(systemName: document.isBilingual ? "rectangle.split.2x1" : "doc.richtext")
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(WorkspacePalette.blue)
+            }
+            .frame(width: 42, height: 48)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(document.paperID)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                HStack(spacing: 7) {
+                    Text(document.formatLabel)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(WorkspacePalette.blue)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(WorkspacePalette.blue.opacity(0.08))
+                        .clipShape(Capsule())
+                    Text(document.modifiedAt, format: .dateTime.year().month().day())
+                    Text(document.byteCountLabel)
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(WorkspacePalette.secondaryText)
+            }
+
+            Spacer(minLength: 12)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(WorkspacePalette.tertiaryText)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
     }
 }
 
@@ -907,7 +1150,11 @@ private struct PaperWebPreview: NSViewRepresentable {
 
     func updateNSView(_ view: WKWebView, context: Context) {
         if view.url != url {
-            view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+            // Generated readers live in outputs/ while PDF page and layout crops
+            // live in the sibling inputs/assets/ tree. WKWebView blocks those
+            // images unless the repository root is included in its read scope.
+            let repositoryRoot = url.deletingLastPathComponent().deletingLastPathComponent()
+            view.loadFileURL(url, allowingReadAccessTo: repositoryRoot)
         }
         guard let scrollTarget, context.coordinator.lastScrollTarget != scrollTarget else { return }
         context.coordinator.lastScrollTarget = scrollTarget
@@ -917,13 +1164,14 @@ private struct PaperWebPreview: NSViewRepresentable {
 }
 
 private enum WorkspacePalette {
-    static let canvas = Color(nsColor: .windowBackgroundColor)
+    static let canvas = Color(nsColor: .textBackgroundColor)
+    static let sidebar = Color(nsColor: .windowBackgroundColor)
     static let panel = Color(nsColor: .controlBackgroundColor)
-    static let controlFill = Color(nsColor: .textBackgroundColor).opacity(0.78)
-    static let border = Color(nsColor: .separatorColor).opacity(0.72)
+    static let controlFill = Color(nsColor: .unemphasizedSelectedContentBackgroundColor).opacity(0.72)
+    static let border = Color(nsColor: .separatorColor).opacity(0.58)
     static let secondaryText = Color.secondary
     static let tertiaryText = Color.secondary.opacity(0.62)
-    static let blue = Color(red: 0.12, green: 0.39, blue: 0.95)
+    static let blue = Color(nsColor: .labelColor)
     static let success = Color(red: 0.25, green: 0.64, blue: 0.31)
 }
 
@@ -943,19 +1191,20 @@ private struct WorkspaceTextFieldStyle: TextFieldStyle {
 private struct WorkspacePrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     var compact = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
             .padding(.horizontal, compact ? 14 : 18)
             .frame(height: compact ? 34 : 44)
             .background(
                 LinearGradient(
                     colors: [
-                        WorkspacePalette.blue.opacity(isEnabled ? (configuration.isPressed ? 0.84 : 1) : 0.42),
-                        Color(red: 0.18, green: 0.48, blue: 1.0).opacity(isEnabled ? (configuration.isPressed ? 0.84 : 1) : 0.42)
+                        WorkspacePalette.blue.opacity(isEnabled ? (configuration.isPressed ? 0.76 : 0.94) : 0.34),
+                        WorkspacePalette.blue.opacity(isEnabled ? (configuration.isPressed ? 0.68 : 0.82) : 0.28)
                     ],
                     startPoint: .leading,
                     endPoint: .trailing
@@ -1065,7 +1314,7 @@ struct ContentView: View {
                 .background(AppPalette.accentGradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                 .shadow(color: AppPalette.accentTeal.opacity(0.24), radius: 12, y: 5)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Paper Translator")
+                Text("KPaper")
                     .font(AppTypography.display(size: 26, weight: .bold))
                     .tracking(-0.5)
                     .foregroundStyle(AppPalette.textPrimary)
@@ -1198,7 +1447,7 @@ struct ContentView: View {
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
                 GridRow {
                     Text("프로젝트")
-                    TextField("paper-structure-translator 경로", text: $model.repoPath)
+                    TextField("KPaper 경로", text: $model.repoPath)
                         .textFieldStyle(GlassTextFieldStyle())
                     Button("저장") {
                         model.saveSettings()
@@ -1457,6 +1706,19 @@ enum OutputKind {
     case bilingual
 }
 
+struct OutputDocument: Identifiable {
+    let url: URL
+    let paperID: String
+    let modifiedAt: Date
+    let byteCount: Int64
+    let isBilingual: Bool
+
+    var id: String { url.path }
+    var fileName: String { url.lastPathComponent }
+    var formatLabel: String { isBilingual ? "한영 비교" : "한국어" }
+    var byteCountLabel: String { ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file) }
+}
+
 enum TranslationProvider: String, CaseIterable, Identifiable {
     case codex
     case api
@@ -1477,6 +1739,7 @@ struct RuntimeSettings {
     let apiKeyOverride: String
     let model: String
     let provider: TranslationProvider
+    let useAdvancedPDFLayout: Bool
 }
 
 struct ModelOption {
@@ -1501,6 +1764,7 @@ final class TranslatorModel: ObservableObject {
     @Published var apiKeyOverride = ""
     @Published var selectedModel: String
     @Published var selectedProvider: TranslationProvider
+    @Published var useAdvancedPDFLayout: Bool
     @Published var codexAuthStatus = "상태를 확인해주세요"
     @Published var isCodexAuthenticated = false
     @Published var clipboardPreview = ""
@@ -1509,16 +1773,26 @@ final class TranslatorModel: ObservableObject {
     @Published var lastPaperID = ""
     @Published var lastKoreanOutput = ""
     @Published var lastBilingualOutput = ""
+    @Published var selectedReaderOutput = ""
     @Published var isRunning = false
     @Published var progressCompleted = 0
     @Published var progressTotal = 0
     @Published var progressLabel = "준비 중"
+    @Published private(set) var jobs: [TranslationJob] = []
+    @Published private(set) var selectedWorkflowID: UUID?
+
+    var runningJobs: [TranslationJob] { jobs.filter(\.isRunning) }
+    var selectedWorkflowIsRunning: Bool {
+        guard let selectedWorkflowID else { return false }
+        return jobs.first(where: { $0.id == selectedWorkflowID })?.isRunning == true
+    }
 
     var progressFraction: Double {
         guard progressTotal > 0 else { return 0 }
         return min(1, max(0, Double(progressCompleted) / Double(progressTotal)))
     }
 
+    private var currentProcesses: [UUID: Process] = [:]
     private var currentProcess: Process?
     private let defaults = UserDefaults.standard
 
@@ -1535,6 +1809,7 @@ final class TranslatorModel: ObservableObject {
         let storedModel = defaults.string(forKey: "selectedModel") ?? Self.defaultModel
         selectedModel = Self.modelOptions.contains { $0.id == storedModel } ? storedModel : Self.defaultModel
         selectedProvider = TranslationProvider(rawValue: defaults.string(forKey: "selectedProvider") ?? "") ?? .api
+        useAdvancedPDFLayout = defaults.object(forKey: "useAdvancedPDFLayout") as? Bool ?? true
         if selectedProvider == .codex {
             DispatchQueue.main.async { [weak self] in self?.refreshCodexStatus() }
         }
@@ -1545,6 +1820,7 @@ final class TranslatorModel: ObservableObject {
         defaults.set(baseURLOverride, forKey: "baseURLOverride")
         defaults.set(selectedModel, forKey: "selectedModel")
         defaults.set(selectedProvider.rawValue, forKey: "selectedProvider")
+        defaults.set(useAdvancedPDFLayout, forKey: "useAdvancedPDFLayout")
         appendLog("settings saved")
     }
 
@@ -1567,16 +1843,15 @@ final class TranslatorModel: ObservableObject {
         }
         let paperID = Self.paperID(from: url)
         let settings = runtimeSettings()
-        startWorkflow(paperID: paperID, title: "URL 번역") { [weak self] in
-            try await self?.runCommand(["fetch", "--paper-id", paperID, "--source-url", value, "--force", "--json"], settings: settings)
+        startWorkflow(paperID: paperID, title: "URL 번역") { [weak self] workflowID in
+            try await self?.runCommand(["fetch", "--paper-id", paperID, "--source-url", value, "--force", "--json"], settings: settings, workflowID: workflowID)
             try Self.validateTranslationProvider(settings: settings)
-            try await self?.runCommand(["translate", "--paper-id", paperID, "--provider", settings.provider.rawValue, "--model", settings.model, "--json"], settings: settings)
-            try await self?.runCommand(["restyle", "--paper-id", paperID, "--json"], settings: settings)
+            try await self?.runCommand(["translate", "--paper-id", paperID, "--provider", settings.provider.rawValue, "--model", settings.model, "--json"], settings: settings, workflowID: workflowID)
+            try await self?.runCommand(["restyle", "--paper-id", paperID, "--json"], settings: settings, workflowID: workflowID)
         }
     }
 
     func handleDrop(providers: [NSItemProvider]) -> Bool {
-        guard !isRunning else { return false }
         guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) else {
             appendLog("error: dropped item is not a file")
             return false
@@ -1613,18 +1888,27 @@ final class TranslatorModel: ObservableObject {
         let paperID = Self.sanitizedID(from: url.deletingPathExtension().lastPathComponent)
         let title = url.deletingPathExtension().lastPathComponent
         let settings = runtimeSettings()
-        startWorkflow(paperID: paperID, title: "PDF 번역") { [weak self] in
-            try await self?.runCommand(["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--json"], settings: settings)
+        startWorkflow(paperID: paperID, title: "PDF 번역") { [weak self] workflowID in
+            var importArguments = ["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--json"]
+            if settings.useAdvancedPDFLayout {
+                importArguments += [
+                    "--layout-backend", "unlimited-ocr-mlx",
+                    "--layout-model", "sahilchachra/unlimited-ocr-mxfp8-mlx"
+                ]
+            } else {
+                importArguments += ["--layout-backend", "liteparse"]
+            }
+            try await self?.runCommand(importArguments, settings: settings, workflowID: workflowID)
             try Self.validateTranslationProvider(settings: settings)
-            try await self?.runCommand(["translate", "--paper-id", paperID, "--provider", settings.provider.rawValue, "--model", settings.model, "--json"], settings: settings)
-            try await self?.runCommand(["restyle", "--paper-id", paperID, "--json"], settings: settings)
+            try await self?.runCommand(["translate", "--paper-id", paperID, "--provider", settings.provider.rawValue, "--model", settings.model, "--json"], settings: settings, workflowID: workflowID)
+            try await self?.runCommand(["restyle", "--paper-id", paperID, "--json"], settings: settings, workflowID: workflowID)
         }
     }
 
     func runDoctor() {
         let settings = runtimeSettings()
-        startWorkflow(paperID: lastPaperID, title: "doctor") { [weak self] in
-            try await self?.runCommand(["doctor", "--json"], settings: settings)
+        startWorkflow(paperID: lastPaperID, title: "doctor") { [weak self] workflowID in
+            try await self?.runCommand(["doctor", "--json"], settings: settings, workflowID: workflowID)
         }
     }
 
@@ -1681,10 +1965,18 @@ final class TranslatorModel: ObservableObject {
     }
 
     func cancel() {
-        currentProcess?.terminate()
-        currentProcess = nil
-        setRunning(false, status: "중지됨")
-        appendLog("cancel requested")
+        guard let workflowID = selectedWorkflowID else { return }
+        currentProcesses[workflowID]?.terminate()
+        currentProcesses[workflowID] = nil
+        updateJob(workflowID) { job in
+            job.statusText = "중지됨"
+            job.isRunning = false
+            Self.append("cancel requested", to: &job.logText)
+        }
+        syncRunningState(status: "중지됨")
+        if let job = jobs.first(where: { $0.id == workflowID }) {
+            logText = job.logText
+        }
     }
 
     func openOutput(kind: OutputKind) {
@@ -1705,8 +1997,83 @@ final class TranslatorModel: ObservableObject {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    func readerOutputURL() -> URL? {
+        if !selectedReaderOutput.isEmpty {
+            let selectedURL = URL(fileURLWithPath: repoPath).appendingPathComponent(selectedReaderOutput)
+            if FileManager.default.fileExists(atPath: selectedURL.path) {
+                return selectedURL
+            }
+        }
+        return outputURL(kind: .korean)
+    }
+
+    func loadOutputDocuments() throws -> [OutputDocument] {
+        let outputFolder = URL(fileURLWithPath: repoPath).appendingPathComponent("outputs", isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: outputFolder.path, isDirectory: &isDirectory) else {
+            return []
+        }
+        guard isDirectory.boolValue else {
+            throw AppError.message("outputs 경로가 폴더가 아닙니다: \(outputFolder.path)")
+        }
+
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey]
+        return try FileManager.default.contentsOfDirectory(
+            at: outputFolder,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        )
+        .compactMap { url -> OutputDocument? in
+            let fileName = url.lastPathComponent
+            let bilingualSuffix = ".ko-en.paper.html"
+            let koreanSuffix = ".ko.paper.html"
+            let isBilingual: Bool
+            let paperID: String
+
+            if fileName.hasSuffix(bilingualSuffix) {
+                isBilingual = true
+                paperID = String(fileName.dropLast(bilingualSuffix.count))
+            } else if fileName.hasSuffix(koreanSuffix) {
+                isBilingual = false
+                paperID = String(fileName.dropLast(koreanSuffix.count))
+            } else {
+                return nil
+            }
+
+            guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true else {
+                return nil
+            }
+            return OutputDocument(
+                url: url,
+                paperID: paperID,
+                modifiedAt: values.contentModificationDate ?? .distantPast,
+                byteCount: Int64(values.fileSize ?? 0),
+                isBilingual: isBilingual
+            )
+        }
+        .sorted {
+            if $0.modifiedAt == $1.modifiedAt {
+                return $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending
+            }
+            return $0.modifiedAt > $1.modifiedAt
+        }
+    }
+
+    func selectOutputDocument(_ document: OutputDocument) {
+        lastPaperID = document.paperID
+        selectedReaderOutput = "outputs/\(document.fileName)"
+
+        let outputFolder = URL(fileURLWithPath: repoPath).appendingPathComponent("outputs", isDirectory: true)
+        let koreanName = "\(document.paperID).ko.paper.html"
+        let bilingualName = "\(document.paperID).ko-en.paper.html"
+        let koreanURL = outputFolder.appendingPathComponent(koreanName)
+        let bilingualURL = outputFolder.appendingPathComponent(bilingualName)
+        lastKoreanOutput = FileManager.default.fileExists(atPath: koreanURL.path) ? "outputs/\(koreanName)" : ""
+        lastBilingualOutput = FileManager.default.fileExists(atPath: bilingualURL.path) ? "outputs/\(bilingualName)" : ""
+    }
+
     func openOutputsFolder() {
-        let url = URL(fileURLWithPath: repoPath).appendingPathComponent("outputs")
+        let url = URL(fileURLWithPath: repoPath).appendingPathComponent("outputs", isDirectory: true)
         NSWorkspace.shared.open(url)
     }
 
@@ -1716,43 +2083,57 @@ final class TranslatorModel: ObservableObject {
             baseURLOverride: baseURLOverride.trimmingCharacters(in: .whitespacesAndNewlines),
             apiKeyOverride: apiKeyOverride.trimmingCharacters(in: .whitespacesAndNewlines),
             model: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines),
-            provider: selectedProvider
+            provider: selectedProvider,
+            useAdvancedPDFLayout: useAdvancedPDFLayout
         )
     }
 
-    private func startWorkflow(paperID: String, title: String, operation: @escaping () async throws -> Void) {
-        guard !isRunning else { return }
+    private func startWorkflow(paperID: String, title: String, operation: @escaping (UUID) async throws -> Void) {
+        let workflowID = UUID()
+        jobs.append(TranslationJob(
+            id: workflowID,
+            paperID: paperID,
+            title: title,
+            statusText: "\(title) 실행 중",
+            isRunning: true
+        ))
+        selectedWorkflowID = workflowID
         logText = ""
         lastPaperID = paperID
         lastKoreanOutput = ""
         lastBilingualOutput = ""
+        selectedReaderOutput = ""
         progressCompleted = 0
         progressTotal = 0
         progressLabel = "준비 중"
-        setRunning(true, status: "\(title) 실행 중")
-        appendLog("paper_id=\(paperID.isEmpty ? "-" : paperID)")
+        statusText = "\(title) 실행 중"
+        syncRunningState(status: "\(title) 실행 중")
+        appendLog("paper_id=\(paperID.isEmpty ? "-" : paperID)", workflowID: workflowID)
         Task {
             do {
-                try await operation()
+                try await operation(workflowID)
                 DispatchQueue.main.async {
-                    self.setRunning(false, status: "완료")
-                    self.appendLog("done")
+                    self.finishWorkflow(workflowID, status: "완료", logLine: "done")
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self.setRunning(false, status: "실패")
-                    self.appendLog("error: \(error.localizedDescription)")
+                    let wasCancelled = self.jobs.first(where: { $0.id == workflowID })?.statusText == "중지됨"
+                    self.finishWorkflow(
+                        workflowID,
+                        status: wasCancelled ? "중지됨" : "실패",
+                        logLine: wasCancelled ? nil : "error: \(error.localizedDescription)"
+                    )
                 }
             }
         }
     }
 
-    private func runCommand(_ arguments: [String], settings: RuntimeSettings) async throws {
+    private func runCommand(_ arguments: [String], settings: RuntimeSettings, workflowID: UUID) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             DispatchQueue.global(qos: .userInitiated).async {
-                let script = URL(fileURLWithPath: settings.repoPath).appendingPathComponent("scripts/paper_translator.py")
+                let script = URL(fileURLWithPath: settings.repoPath).appendingPathComponent("scripts/kpaper.py")
                 guard FileManager.default.fileExists(atPath: script.path) else {
-                    continuation.resume(throwing: AppError.message("scripts/paper_translator.py not found at \(script.path)"))
+                    continuation.resume(throwing: AppError.message("scripts/kpaper.py not found at \(script.path)"))
                     return
                 }
                 guard let uv = Self.resolveUVExecutable() else {
@@ -1763,7 +2144,7 @@ final class TranslatorModel: ObservableObject {
                 let process = Process()
                 process.currentDirectoryURL = URL(fileURLWithPath: settings.repoPath)
                 process.executableURL = uv
-                process.arguments = ["run", "scripts/paper_translator.py"] + arguments
+                process.arguments = ["run", "scripts/kpaper.py"] + arguments
 
                 var env = ProcessInfo.processInfo.environment
                 env["UV_CACHE_DIR"] = ".uv-cache"
@@ -1775,6 +2156,9 @@ final class TranslatorModel: ObservableObject {
                 }
                 if let codex = Self.resolveCodexExecutable() {
                     env["CODEX_EXECUTABLE"] = codex.path
+                    env = Self.environmentByAddingToolDirectories(env, tools: [uv, codex])
+                } else {
+                    env = Self.environmentByAddingToolDirectories(env, tools: [uv])
                 }
                 process.environment = env
 
@@ -1787,14 +2171,14 @@ final class TranslatorModel: ObservableObject {
                     guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
                     commandOutput += text
                     DispatchQueue.main.async {
-                        self?.appendLog(text.trimmingCharacters(in: .newlines))
+                        self?.appendLog(text.trimmingCharacters(in: .newlines), workflowID: workflowID)
                     }
                 }
 
                 DispatchQueue.main.async {
-                    self.currentProcess = process
+                    self.currentProcesses[workflowID] = process
                     let displayUV = uv.path.replacingOccurrences(of: settings.repoPath + "/", with: "")
-                    self.appendLog("$ \(displayUV) run scripts/paper_translator.py \(arguments.joined(separator: " "))")
+                    self.appendLog("$ \(displayUV) run scripts/kpaper.py \(arguments.joined(separator: " "))", workflowID: workflowID)
                 }
 
                 do {
@@ -1802,13 +2186,15 @@ final class TranslatorModel: ObservableObject {
                     process.waitUntilExit()
                     pipe.fileHandleForReading.readabilityHandler = nil
                     DispatchQueue.main.async {
-                        if self.currentProcess === process {
-                            self.currentProcess = nil
+                        if self.currentProcesses[workflowID] === process {
+                            self.currentProcesses[workflowID] = nil
                         }
                     }
                     if process.terminationStatus == 0 {
                         DispatchQueue.main.async {
-                            self.captureOutputPaths(from: commandOutput)
+                            if self.selectedWorkflowID == workflowID {
+                                self.captureOutputPaths(from: commandOutput)
+                            }
                         }
                         continuation.resume()
                     } else {
@@ -1831,6 +2217,10 @@ final class TranslatorModel: ObservableObject {
                 let process = Process()
                 process.executableURL = codex
                 process.arguments = arguments
+                process.environment = Self.environmentByAddingToolDirectories(
+                    ProcessInfo.processInfo.environment,
+                    tools: [codex]
+                )
                 let pipe = Pipe()
                 process.standardOutput = pipe
                 process.standardError = pipe
@@ -1869,6 +2259,53 @@ final class TranslatorModel: ObservableObject {
         statusText = status
     }
 
+    func selectWorkflow(_ workflowID: UUID) {
+        guard let job = jobs.first(where: { $0.id == workflowID }) else { return }
+        selectedWorkflowID = workflowID
+        lastPaperID = job.paperID
+        statusText = job.statusText
+        progressCompleted = job.progressCompleted
+        progressTotal = job.progressTotal
+        progressLabel = job.progressLabel
+        logText = job.logText
+    }
+
+    private func finishWorkflow(_ workflowID: UUID, status: String, logLine: String?) {
+        currentProcesses[workflowID] = nil
+        updateJob(workflowID) { job in
+            job.statusText = status
+            job.isRunning = false
+            if let logLine { Self.append(logLine, to: &job.logText) }
+        }
+        if selectedWorkflowID == workflowID {
+            statusText = status
+            if let job = jobs.first(where: { $0.id == workflowID }) {
+                logText = job.logText
+            }
+        }
+        syncRunningState(status: status)
+    }
+
+    private func syncRunningState(status: String) {
+        isRunning = jobs.contains(where: \.isRunning)
+        if !isRunning || selectedWorkflowID == nil {
+            statusText = status
+        }
+    }
+
+    private func updateJob(_ workflowID: UUID, change: (inout TranslationJob) -> Void) {
+        guard let index = jobs.firstIndex(where: { $0.id == workflowID }) else { return }
+        change(&jobs[index])
+    }
+
+    private static func append(_ line: String, to text: inout String) {
+        guard !line.isEmpty else { return }
+        text = text.isEmpty ? line : text + "\n" + line
+        if text.count > 120_000 {
+            text.removeFirst(text.count - 120_000)
+        }
+    }
+
     private func appendLog(_ line: String) {
         guard !line.isEmpty else { return }
         updateProgress(from: line)
@@ -1882,6 +2319,17 @@ final class TranslatorModel: ObservableObject {
         }
     }
 
+    private func appendLog(_ line: String, workflowID: UUID) {
+        guard !line.isEmpty else { return }
+        updateJob(workflowID) { job in
+            Self.append(line, to: &job.logText)
+            Self.updateProgress(from: line, job: &job)
+        }
+        guard selectedWorkflowID == workflowID else { return }
+        updateProgress(from: line)
+        Self.append(line, to: &logText)
+    }
+
     private func updateProgress(from text: String) {
         for rawLine in text.split(whereSeparator: \.isNewline) {
             let line = String(rawLine)
@@ -1892,6 +2340,19 @@ final class TranslatorModel: ObservableObject {
             progressTotal = total
             progressCompleted = min(total, progressCompleted + 1)
             progressLabel = "번역 청크 \(progressCompleted)/\(total)"
+        }
+    }
+
+    private static func updateProgress(from text: String, job: inout TranslationJob) {
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = String(rawLine)
+            guard let marker = line.range(of: "completed batch ") else { continue }
+            let batchToken = line[marker.upperBound...].split(separator: " ").first ?? ""
+            let batchParts = batchToken.split(separator: "/")
+            guard batchParts.count == 2, let total = Int(batchParts[1]) else { continue }
+            job.progressTotal = total
+            job.progressCompleted = min(total, job.progressCompleted + 1)
+            job.progressLabel = "번역 청크 \(job.progressCompleted)/\(total)"
         }
     }
 
@@ -1944,7 +2405,7 @@ final class TranslatorModel: ObservableObject {
         for start in starts {
             var cursor = start.standardizedFileURL
             for _ in 0..<10 {
-                let candidate = cursor.appendingPathComponent("paper-translator")
+                let candidate = cursor.appendingPathComponent("kpaper")
                 if fileManager.isExecutableFile(atPath: candidate.path) {
                     return cursor.path
                 }
@@ -1958,9 +2419,9 @@ final class TranslatorModel: ObservableObject {
 
     private static func isLiteParseRepo(atPath path: String) -> Bool {
         let root = URL(fileURLWithPath: path)
-        let script = root.appendingPathComponent("scripts/paper_translator.py")
+        let script = root.appendingPathComponent("scripts/kpaper.py")
         let manifest = root.appendingPathComponent("pyproject.toml")
-        guard FileManager.default.isExecutableFile(atPath: root.appendingPathComponent("paper-translator").path),
+        guard FileManager.default.isExecutableFile(atPath: root.appendingPathComponent("kpaper").path),
               FileManager.default.fileExists(atPath: script.path),
               FileManager.default.fileExists(atPath: manifest.path) else {
             return false
@@ -2010,6 +2471,22 @@ final class TranslatorModel: ObservableObject {
             URL(fileURLWithPath: "/usr/local/bin/codex")
         ]
         return candidates.first { fileManager.isExecutableFile(atPath: $0.path) }
+    }
+
+    private static func environmentByAddingToolDirectories(
+        _ environment: [String: String],
+        tools: [URL]
+    ) -> [String: String] {
+        var updated = environment
+        var directories = tools.map { $0.deletingLastPathComponent().path }
+        let existing = environment["PATH", default: ""]
+            .split(separator: ":")
+            .map(String.init)
+        directories.append(contentsOf: existing)
+        directories.append(contentsOf: ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"])
+        var seen = Set<String>()
+        updated["PATH"] = directories.filter { !$0.isEmpty && seen.insert($0).inserted }.joined(separator: ":")
+        return updated
     }
 
     private static func validateTranslationProvider(settings: RuntimeSettings) throws {
@@ -2067,7 +2544,7 @@ final class TranslatorModel: ObservableObject {
             return false
         }
         let semaphore = DispatchSemaphore(value: 0)
-        let queue = DispatchQueue(label: "paper-translator.endpoint-check")
+        let queue = DispatchQueue(label: "kpaper.endpoint-check")
         let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
         var isReady = false
 

@@ -1,5 +1,5 @@
 [project]
-name = "structure-preserving-paper-translator"
+name = "kpaper"
 version = "0.0.1"
 description = "Chunked literal Korean translation pipeline for structure-preserving academic paper HTML."
 requires-python = ">=3.11"
@@ -7,9 +7,11 @@ dependencies = [
   "beautifulsoup4>=4.14.3",
   "liteparse>=2.0.0",
   "lxml>=6.1.0",
+  "mlx-vlm>=0.6.4",
+  "pillow>=12.1.1",
+  "pymupdf>=1.28.0",
   "requests>=2.33.1",
 ]
 
 [tool.uv]
 package = false
-

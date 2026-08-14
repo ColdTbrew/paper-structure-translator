@@ -10,7 +10,7 @@ Use this skill when a user wants to run, modify, debug, or extend the structure-
 - "Restore tables without retranslating"
 - "Import this PDF"
 - "Translate this Hugging Face PDF"
-- "Run the paper-structure-translator repo"
+- "Run the KPaper repo"
 - "Use this repo to translate papers"
 
 ## Purpose
@@ -47,13 +47,13 @@ If `.env` is missing, do not invent credentials. Run `--dry-run` or ask the user
 Check readiness:
 
 ```bash
-./paper-translator doctor --json
+./kpaper doctor --json
 ```
 
 Fetch source HTML:
 
 ```bash
-./paper-translator fetch \
+./kpaper fetch \
   --paper-id mmdocrag \
   --source-url https://ar5iv.labs.arxiv.org/html/2505.16470v2 \
   --json
@@ -62,7 +62,7 @@ Fetch source HTML:
 Import PDF-only sources:
 
 ```bash
-./paper-translator pdf-import \
+./kpaper pdf-import \
   --paper-id deepseek-v4 \
   --pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf \
   --title "DeepSeek V4" \
@@ -80,7 +80,7 @@ Notes:
 One-paper dry run:
 
 ```bash
-./paper-translator translate \
+./kpaper translate \
   --paper-id mmdocrag \
   --json \
   --dry-run
@@ -89,21 +89,21 @@ One-paper dry run:
 One-paper real run:
 
 ```bash
-./paper-translator translate --paper-id mmdocrag
+./kpaper translate --paper-id mmdocrag
 ```
 
 Style/table refresh without LLM calls:
 
 ```bash
-./paper-translator restyle --paper-id mmdocrag
+./kpaper restyle --paper-id mmdocrag
 ```
 
 ## Editing Rules
 
-- Use `./paper-translator` as the primary interface.
+- Use `./kpaper` as the primary interface.
 - Use `scripts/translate_html_blocks.py` only when editing translation, masking, bilingual viewer, and CSS internals.
 - Use `scripts/apply_paper_viewer_style.py` only when editing restyle internals.
-- Prefer `./paper-translator translate --source-url ... --paper-id ...` over editing source URL lists.
+- Prefer `./kpaper translate --source-url ... --paper-id ...` over editing source URL lists.
 - Keep `figure.ltx_table` out of model calls.
 - Preserve HTML tags with the mask/restore path.
 - Keep generated HTML under `outputs/`; it is ignored by git.
@@ -119,7 +119,7 @@ uv run python -m py_compile scripts/*.py
 For layout changes, verify in a browser:
 
 ```bash
-./paper-translator serve --port 8799
+./kpaper serve --port 8799
 ```
 
 Open:
@@ -143,7 +143,7 @@ Check:
 Check for secrets:
 
 ```bash
-rg -n -e 'sk-[A-Za-z0-9]' -e 'OPENAI_API_KEY=.*sk-[A-Za-z0-9]' README.md README.ko.md AGENTS.md CLAUDE.md skills scripts paper-translator .env.example pyproject.toml uv.lock || true
+rg -n -e 'sk-[A-Za-z0-9]' -e 'OPENAI_API_KEY=.*sk-[A-Za-z0-9]' README.md README.ko.md AGENTS.md CLAUDE.md skills scripts kpaper .env.example pyproject.toml uv.lock || true
 ```
 
 Do not commit:

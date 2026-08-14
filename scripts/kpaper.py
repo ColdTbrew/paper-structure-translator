@@ -22,6 +22,7 @@ ROOT_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 import apply_paper_viewer_style  # noqa: E402
+import pdf_layout  # noqa: E402
 import translate_html_blocks  # noqa: E402
 
 
@@ -106,7 +107,7 @@ def resolve_paths(args: argparse.Namespace) -> dict[str, Path]:
     if not paper_id:
         fail(
             "--paper-id is required when --input is not provided",
-            "try: scripts/paper_translator.py translate --paper-id my-paper --source-url https://ar5iv.labs.arxiv.org/html/...",
+            "try: scripts/kpaper.py translate --paper-id my-paper --source-url https://ar5iv.labs.arxiv.org/html/...",
         )
 
     input_path = input_path or Path("inputs") / f"{paper_id}.source.html"
@@ -236,19 +237,34 @@ def text_blocks_from_liteparse_page(page: Any) -> list[str]:
     return [block for block in blocks if block]
 
 
+def extract_image_layout_with_fallback(
+    pdf_path: Path,
+    page_index: int,
+    page_image: Path,
+    layout_engine: Any,
+) -> tuple[list[pdf_layout.LayoutBlock], str, str]:
+    """Fall back to native PDF geometry when ML layout fails for one page."""
+    try:
+        blocks, raw_layout = layout_engine.parse_image(page_image)
+        return blocks, raw_layout, ""
+    except RuntimeError as exc:
+        fallback_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
+        return fallback_blocks, "", str(exc)
+
+
 def write_liteparse_screenshots(
     shots: list[Any],
     assets_dir: Path,
-    paper_id: str,
-) -> list[str]:
+) -> list[Path]:
     assets_dir.mkdir(parents=True, exist_ok=True)
-    image_names: list[str] = []
+    image_paths: list[Path] = []
     for shot in sorted(shots, key=lambda item: getattr(item, "page_num", 0)):
-        page_num = getattr(shot, "page_num", len(image_names) + 1)
+        page_num = getattr(shot, "page_num", len(image_paths) + 1)
         image_name = f"page-{page_num:04d}.png"
-        (assets_dir / image_name).write_bytes(getattr(shot, "image_bytes"))
-        image_names.append(image_name)
-    return [f"../inputs/assets/{paper_id}/{image_name}" for image_name in image_names]
+        image_path = assets_dir / image_name
+        image_path.write_bytes(getattr(shot, "image_bytes"))
+        image_paths.append(image_path)
+    return image_paths
 
 
 def pdf_to_source_html(
@@ -259,6 +275,9 @@ def pdf_to_source_html(
     title: str,
     image_dpi: int,
     max_pages: int,
+    layout_backend: str,
+    layout_model: str,
+    layout_max_tokens: int,
     dry_run: bool,
 ) -> dict[str, Any]:
     if dry_run:
@@ -269,7 +288,9 @@ def pdf_to_source_html(
             "assets_dir": str(assets_dir),
             "image_dpi": image_dpi,
             "max_pages": max_pages,
-            "parser": "liteparse-python",
+            "layout_backend": layout_backend,
+            "layout_model": layout_model if layout_backend == "unlimited-ocr-mlx" else "",
+            "parser": "liteparse-python+pymupdf-layout" if layout_backend == "native" else "liteparse-python",
         }
     if not pdf_path.exists():
         fail(f"PDF not found: {pdf_path}")
@@ -287,39 +308,108 @@ def pdf_to_source_html(
     assets_dir.mkdir(parents=True, exist_ok=True)
     page_sections: list[str] = []
     text_blocks = 0
+    visual_blocks = 0
+    layout_fallbacks: list[dict[str, Any]] = []
+    layout_engine = (
+        pdf_layout.UnlimitedOCRMLX(model_id=layout_model, max_tokens=layout_max_tokens)
+        if layout_backend == "unlimited-ocr-mlx"
+        else None
+    )
 
     parser = LiteParse(**parser_kwargs)
     parsed = parser.parse(pdf_path)
     page_numbers = list(range(1, max_pages + 1)) if max_pages > 0 else None
     shots = parser.screenshot(pdf_path, page_numbers=page_numbers)
     pages = getattr(parsed, "pages", [])
-    image_srcs = write_liteparse_screenshots(shots, assets_dir, paper_id)
-    selected_pages = max(len(pages), len(image_srcs))
+    image_paths = write_liteparse_screenshots(shots, assets_dir)
+    selected_pages = max(len(pages), len(image_paths))
 
     for page_index in range(selected_pages):
         page = pages[page_index] if page_index < len(pages) else {}
-        paragraphs = text_blocks_from_liteparse_page(page)
-        text_blocks += len(paragraphs)
-        image_src = image_srcs[page_index] if page_index < len(image_srcs) else ""
-        paragraph_html = "\n".join(
-            f'<div class="ltx_para" id="p{page_index + 1}-{idx + 1}"><p class="ltx_p">{html.escape(text)}</p></div>'
-            for idx, text in enumerate(paragraphs)
-        )
-        figure_html = (
-            f"""
+        page_image = image_paths[page_index] if page_index < len(image_paths) else None
+        if layout_backend != "liteparse" and page_image is not None:
+            if layout_engine is not None:
+                layout_blocks, raw_layout, fallback_reason = extract_image_layout_with_fallback(
+                    pdf_path, page_index, page_image, layout_engine
+                )
+                if fallback_reason:
+                    layout_fallbacks.append(
+                        {
+                            "page": page_index + 1,
+                            "from": "unlimited-ocr-mlx",
+                            "to": "native" if layout_blocks else "liteparse",
+                            "reason": fallback_reason,
+                        }
+                    )
+                layout_blocks = [
+                    block
+                    for block in layout_blocks
+                    if not pdf_layout.is_page_number_block(block)
+                    and not (
+                        page_index > 0
+                        and pdf_layout.is_heading_block(block)
+                        and block.bbox[1] < 85
+                    )
+                ]
+            else:
+                layout_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
+                raw_layout = ""
+            if layout_blocks:
+                page_html, page_visuals = pdf_layout.render_layout_page(
+                    layout_blocks,
+                    page_image=page_image,
+                    assets_dir=assets_dir,
+                    html_parent=html_path.parent,
+                    paper_id=paper_id,
+                    page_num=page_index + 1,
+                )
+                if raw_layout:
+                    raw_layout_path = assets_dir / "layout" / f"page-{page_index + 1:04d}.grounding.txt"
+                    raw_layout_path.parent.mkdir(parents=True, exist_ok=True)
+                    raw_layout_path.write_text(raw_layout, encoding="utf-8")
+                text_blocks += sum(1 for block in layout_blocks if not pdf_layout.is_visual_block(block))
+                visual_blocks += page_visuals
+            else:
+                paragraphs = text_blocks_from_liteparse_page(page)
+                text_blocks += len(paragraphs)
+                image_src = pdf_layout.relative_asset_src(page_image, html_path.parent)
+                paragraph_html = "\n".join(
+                    f'<div class="ltx_para" id="p{page_index + 1}-{idx + 1}"><p class="ltx_p">{html.escape(text)}</p></div>'
+                    for idx, text in enumerate(paragraphs)
+                )
+                page_html = (
+                    f'<figure class="ltx_figure codex_pdf_page_image">'
+                    f'<img class="ltx_graphics" src="{html.escape(image_src)}" alt="PDF page {page_index + 1}">'
+                    f'</figure>\n{paragraph_html}'
+                )
+        else:
+            paragraphs = text_blocks_from_liteparse_page(page)
+            text_blocks += len(paragraphs)
+            image_src = pdf_layout.relative_asset_src(page_image, html_path.parent) if page_image else ""
+            paragraph_html = "\n".join(
+                f'<div class="ltx_para" id="p{page_index + 1}-{idx + 1}"><p class="ltx_p">{html.escape(text)}</p></div>'
+                for idx, text in enumerate(paragraphs)
+            )
+            figure_html = (
+                f"""
   <figure class="ltx_figure codex_pdf_page_image">
     <img class="ltx_graphics" src="{html.escape(image_src)}" alt="PDF page {page_index + 1}">
   </figure>
 """.rstrip()
-            if image_src
+                if image_src
+                else ""
+            )
+            page_html = f"{figure_html}\n{paragraph_html}"
+        page_label_html = (
+            f'<h2 class="ltx_title ltx_title_section">Page {page_index + 1}</h2>'
+            if layout_backend == "liteparse"
             else ""
         )
         page_sections.append(
             f"""
 <section class="ltx_section codex_pdf_page" id="page-{page_index + 1}">
-  <h2 class="ltx_title ltx_title_section">Page {page_index + 1}</h2>
-  {figure_html}
-  {paragraph_html}
+  {page_label_html}
+  {page_html}
 </section>
 """.strip()
         )
@@ -347,10 +437,14 @@ def pdf_to_source_html(
         "output": str(html_path),
         "assets_dir": str(assets_dir),
         "pages": selected_pages,
-        "images": len(image_srcs),
+        "images": len(image_paths),
         "text_blocks": text_blocks,
-        "parser": "liteparse-python",
+        "visual_blocks": visual_blocks,
+        "parser": "liteparse-python+pymupdf-layout" if layout_backend == "native" else "liteparse-python",
         "ocr_enabled": False,
+        "layout_backend": layout_backend,
+        "layout_model": layout_model if layout_engine is not None else "",
+        "layout_fallbacks": layout_fallbacks,
     }
 
 
@@ -366,6 +460,9 @@ def command_doctor(args: argparse.Namespace) -> None:
         "openai_api_key_present": bool(api_key),
         "openai_base_url_present": bool(base_url),
         "liteparse_python_present": importlib.util.find_spec("liteparse") is not None,
+        "pymupdf_present": importlib.util.find_spec("pymupdf") is not None,
+        "pillow_present": importlib.util.find_spec("PIL") is not None,
+        "mlx_vlm_present": importlib.util.find_spec("mlx_vlm") is not None,
         "inputs_dir_exists": Path("inputs").exists(),
         "outputs_dir_exists": Path("outputs").exists(),
         "scripts_dir_exists": Path("scripts").exists(),
@@ -413,6 +510,9 @@ def command_pdf_import(args: argparse.Namespace) -> None:
         title=title,
         image_dpi=args.image_dpi,
         max_pages=args.max_pages,
+        layout_backend=args.layout_backend,
+        layout_model=args.layout_model,
+        layout_max_tokens=args.layout_max_tokens,
         dry_run=args.dry_run,
     )
     payload = {
@@ -421,8 +521,8 @@ def command_pdf_import(args: argparse.Namespace) -> None:
         "fetch": fetch_result,
         "result": import_result,
         "next": {
-            "dry_run_translate": f"./paper-translator translate --paper-id {paper_id} --dry-run",
-            "translate": f"./paper-translator translate --paper-id {paper_id}",
+            "dry_run_translate": f"./kpaper translate --paper-id {paper_id} --dry-run",
+            "translate": f"./kpaper translate --paper-id {paper_id}",
         },
     }
     emit(args, payload, f"{import_result['status']} {html_path}")
@@ -450,7 +550,7 @@ def command_translate(args: argparse.Namespace) -> None:
     if not paths["input"].exists() and not args.dry_run:
         fail(
             f"input HTML not found: {paths['input']}",
-            f"try: scripts/paper_translator.py fetch --paper-id {args.paper_id} --source-url https://ar5iv.labs.arxiv.org/html/...",
+            f"try: scripts/kpaper.py fetch --paper-id {args.paper_id} --source-url https://ar5iv.labs.arxiv.org/html/...",
         )
 
     translated_args = [
@@ -522,7 +622,7 @@ def command_restyle(args: argparse.Namespace) -> None:
     if not paths["output"].exists():
         fail(
             f"translated HTML not found: {paths['output']}",
-            f"try: scripts/paper_translator.py translate --paper-id {args.paper_id} --input {source_path}",
+            f"try: scripts/kpaper.py translate --paper-id {args.paper_id} --input {source_path}",
         )
     if not source_path.exists():
         fail(f"source HTML not found: {source_path}")
@@ -587,7 +687,7 @@ def add_path_flags(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="paper-translator",
+        prog="kpaper",
         description="Agent-aware CLI for structure-preserving Korean paper HTML translation.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -596,7 +696,7 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor",
         help="check local environment readiness",
         description="Check whether dependencies, directories, and headless API credentials are ready.",
-        epilog="example: scripts/paper_translator.py doctor --json",
+        epilog="example: scripts/kpaper.py doctor --json",
     )
     add_common_flags(doctor)
     doctor.add_argument("--env-file", default=".env")
@@ -606,7 +706,7 @@ def build_parser() -> argparse.ArgumentParser:
         "fetch",
         help="download one ar5iv HTML source",
         description="Download a single ar5iv HTML document into inputs/ using explicit CLI flags.",
-        epilog="example: scripts/paper_translator.py fetch --paper-id my-paper --source-url https://ar5iv.labs.arxiv.org/html/...",
+        epilog="example: scripts/kpaper.py fetch --paper-id my-paper --source-url https://ar5iv.labs.arxiv.org/html/...",
     )
     add_common_flags(fetch)
     fetch.add_argument("--paper-id", required=True)
@@ -621,7 +721,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="convert a PDF into image-backed source HTML",
         description="Download or read a PDF, render page images with Python LiteParse, extract text blocks, and write inputs/<paper-id>.source.html.",
         epilog=(
-            "example: scripts/paper_translator.py pdf-import --paper-id deepseek-v4 "
+            "example: scripts/kpaper.py pdf-import --paper-id deepseek-v4 "
             "--pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/resolve/main/DeepSeek_V4.pdf"
         ),
     )
@@ -634,6 +734,23 @@ def build_parser() -> argparse.ArgumentParser:
     pdf_import.add_argument("--title", default="", help="document title for the generated source HTML")
     pdf_import.add_argument("--image-dpi", type=int, default=144)
     pdf_import.add_argument("--max-pages", type=int, default=0, help="limit imported pages; 0 means all pages")
+    pdf_import.add_argument(
+        "--layout-backend",
+        choices=("native", "liteparse", "unlimited-ocr-mlx"),
+        default="unlimited-ocr-mlx",
+        help="layout source: Unlimited-OCR MLX grounding, native PDF geometry, or page-level LiteParse fallback",
+    )
+    pdf_import.add_argument(
+        "--layout-model",
+        default=pdf_layout.DEFAULT_LAYOUT_MODEL,
+        help="Hugging Face model id used by --layout-backend unlimited-ocr-mlx",
+    )
+    pdf_import.add_argument(
+        "--layout-max-tokens",
+        type=int,
+        default=8192,
+        help="maximum grounded layout tokens generated per page",
+    )
     pdf_import.add_argument("--force", action="store_true", help="overwrite existing downloaded PDF")
     pdf_import.add_argument("--dry-run", action="store_true")
     pdf_import.set_defaults(func=command_pdf_import)
@@ -643,7 +760,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="translate one paper into Korean reader HTML",
         description="Translate one source HTML file and write Korean-only plus bilingual reader HTML.",
         epilog=(
-            "example: scripts/paper_translator.py translate --paper-id my-paper "
+            "example: scripts/kpaper.py translate --paper-id my-paper "
             "--source-url https://ar5iv.labs.arxiv.org/html/... --dry-run"
         ),
     )
@@ -667,7 +784,7 @@ def build_parser() -> argparse.ArgumentParser:
         "restyle",
         help="refresh viewer CSS and restore source tables",
         description="Reapply viewer styling and rebuild bilingual output without making model calls.",
-        epilog="example: scripts/paper_translator.py restyle --paper-id mmdocrag",
+        epilog="example: scripts/kpaper.py restyle --paper-id mmdocrag",
     )
     add_common_flags(restyle)
     add_path_flags(restyle)
@@ -679,7 +796,7 @@ def build_parser() -> argparse.ArgumentParser:
         "serve",
         help="serve the workspace for browser verification",
         description="Start a local static file server for inspecting generated outputs in a browser.",
-        epilog="example: scripts/paper_translator.py serve --port 8799",
+        epilog="example: scripts/kpaper.py serve --port 8799",
     )
     add_common_flags(serve)
     serve.add_argument("--host", default="127.0.0.1")
